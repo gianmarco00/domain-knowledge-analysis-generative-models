@@ -1,0 +1,13 @@
+[project]
+name = "ood-domain-signals"
+version = "0.1.0"
+description = "OOD detection signals for studying domain knowledge in generative models"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

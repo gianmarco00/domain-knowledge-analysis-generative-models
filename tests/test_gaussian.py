@@ -1,6 +1,6 @@
 import torch
-import math.gaussian as gaussian
-
+import math
+import domain_knowledge_analysis.math.gaussian as gaussian
 
 
 def test_log_prob_returns_one_value_per_batch_element():
@@ -64,4 +64,16 @@ def test_kl_divergence_equals_zero_for_same_distributions():
 
     result = gaussian.kl_divergence(mean, log_variance)
 
-    assert torch.allclose(result, 0.0)
+    assert torch.allclose(result, torch.tensor(0.0))
+
+def test_kl_divergence_is_non_negative():
+
+    batch_size = 4
+    latent_dim = 3
+
+    mean = torch.randn(batch_size, latent_dim)
+    log_variance = torch.randn(batch_size, latent_dim)
+
+    result = gaussian.kl_divergence(mean, log_variance)
+
+    assert torch.all(result >= 0.0)
