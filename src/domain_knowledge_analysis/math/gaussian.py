@@ -17,14 +17,14 @@ def sample(mean, log_variance):
 
     epsilon = torch.randn_like(mean)
 
-    z = mean + torch.exp (0.5 * log_variance) * epsilon
+    z = mean + torch.exp(0.5 * log_variance) * epsilon
 
     return z 
 
 def kl_divergence(mean, log_variance):
 # KL = 0.5 * sum_j [exp(log_variance_j) + mean_j^2 - 1 - log_variance_j]
 
-    kl_j = 0.5 * (torch.exp(log_variance) + torch.pow(mean, 2) -1 - log_variance)
+    kl_j = 0.5 * (torch.exp(log_variance) + torch.pow(mean, 2) - 1 - log_variance)
 
     kl = torch.sum(kl_j, dim=1)
 
