@@ -1,6 +1,6 @@
 import torch
 
-def log_prob_from_logits(x, logits):
+def bernoulli_log_prob_from_logits(x, logits):
     """
         This function computes the log probability of a binary image x given the decoder's output logits.
             - x is a binary image (0s and 1s). 
