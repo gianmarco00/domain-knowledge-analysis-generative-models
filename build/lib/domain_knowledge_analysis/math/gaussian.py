@@ -3,7 +3,7 @@ import torch
 
 # Assumes p(z) = N(0, I) and q(z|x) = N(mean, exp(log_variance)) is a diagonal Gaussian distribution
 
-def gaussian_log_prob(z, mean, log_variance):
+def log_prob(z, mean, log_variance):
 # log q(z) = -0.5 * sum_j [log(2π) + log_variance_j + (z_j - mean_j)^2 / variance_j ]
 
     log_p_z_j = -0.5 * (math.log(2*math.pi) + log_variance + torch.pow(z-mean, 2) / torch.exp(log_variance))
@@ -12,7 +12,7 @@ def gaussian_log_prob(z, mean, log_variance):
 
     return log_p_z
 
-def sample_gaussian(mean, log_variance):
+def sample(mean, log_variance):
 # z = mean + exp(0.5 * log_variance) * epsilon, where epsilon ~ N(0, I)
 
     epsilon = torch.randn_like(mean)
