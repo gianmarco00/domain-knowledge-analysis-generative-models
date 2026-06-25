@@ -1,5 +1,5 @@
 [project]
-name = "ood-domain-signals"
+name = "domain_knowledge_analysis"
 version = "0.1.0"
 description = "OOD detection signals for studying domain knowledge in generative models"
 requires-python = ">=3.10"
