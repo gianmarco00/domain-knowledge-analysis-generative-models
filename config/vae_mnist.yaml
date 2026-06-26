@@ -1,0 +1,38 @@
+experiment:
+  name: vae_mnist
+
+paths:
+  dataset_dir: datasets
+  runs_dir: runs
+
+dataset:
+  name: mnist
+  train: true
+  download: true
+  train_split: 0.9
+  shape: [1, 28, 28]
+
+dataloader:
+  batch_size: 64
+  shuffle_train: true
+  shuffle_validation: false
+  num_workers: 0
+
+training:
+  epochs: 10
+  learning_rate: 0.001
+
+model:
+  name: vae
+
+  encoder:
+    latent_dim: 12
+    out_channels: [24, 24, 24, 24]
+    kernels: [3, 3, 3, 3]
+    strides: [1, 2, 2, 1]
+    paddings: [1, 1, 1, 1]
+
+optimizer:
+  name: adam
+
+seed: 42

@@ -1,8 +1,9 @@
 import torch
+from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, loss, epochs, device, log_dir=None):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, loss, epochs, device, logger=None):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
@@ -10,10 +11,16 @@ class Trainer:
         self.loss = loss
         self.epochs = epochs
         self.device = device
+        self.logger = logger
 
         self.model.to(self.device)
 
-        self.writer = SummaryWriter(log_dir) if log_dir is not None else None
+        
+
+        self.history = {
+            "train_loss": [],
+            "validation_loss": [],
+        }
     
     def train_epoch(self):
 
@@ -24,8 +31,8 @@ class Trainer:
 
             x = batch[0].to(self.device)
             self.optimizer.zero_grad()
-            reconstructed_x, mean, log_variance = self.model(x)
-            loss_value = self.loss(x, reconstructed_x, mean, log_variance)
+            logits, mean, log_variance = self.model(x)
+            loss_value = self.loss(x, logits, mean, log_variance)
             loss_value.backward()
             self.optimizer.step()
 
@@ -42,8 +49,8 @@ class Trainer:
             for batch in self.validate_dataloader:
 
                 x = batch[0].to(self.device)
-                reconstructed_x, mean, log_variance = self.model(x)
-                loss_value = self.loss(x, reconstructed_x, mean, log_variance)
+                logits, mean, log_variance = self.model(x)
+                loss_value = self.loss(x, logits, mean, log_variance)
 
                 total_loss += loss_value.item()
 
@@ -51,16 +58,28 @@ class Trainer:
     
     def fit(self):
 
-        for epoch in range(self.epochs):
+        progress_bar = tqdm(range(self.epochs), desc="Training")
+
+        for epoch in progress_bar:
 
             train_loss = self.train_epoch()
-            validate_loss = self.validate_epoch()
+            validation_loss = self.validate_epoch()
 
-            if self.writer is not None:
-                self.writer.add_scalar("Loss/train", train_loss, epoch)
-                self.writer.add_scalar("Loss/validation", validate_loss, epoch)
+            self.history["train_loss"].append(train_loss)
+            self.history["validation_loss"].append(validation_loss)
 
-        if self.writer is not None:
-            self.writer.close() 
+            progress_bar.set_postfix({
+                    "train_loss": train_loss,
+                    "validation_loss": validation_loss
+                })
 
-        return None
+            if self.logger is not None:
+
+                self.logger.log_scalar("Loss/train", train_loss, epoch)
+                self.logger.log_scalar("Loss/validation", validation_loss, epoch)
+                self.logger.flush()
+
+        if self.logger is not None:
+            self.logger.close()
+
+        return self.history

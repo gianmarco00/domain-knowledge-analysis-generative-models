@@ -6,12 +6,15 @@ class Encoder(nn.Module):
     def __init__(self, image_shape, params):
         super(Encoder, self).__init__()
 
+        self.image_shape = image_shape
+
         layers = []
 
         kernels = params["kernels"]
         out_channels = params["out_channels"]
         strides = params["strides"]
         paddings = params["paddings"]
+        latent_dim = params["latent_dim"]
 
         in_channels = [image_shape[0], *out_channels[:-1]]
 
@@ -52,8 +55,8 @@ class Encoder(nn.Module):
             self.fc_neurons = dummy.flatten(start_dim=1).shape[1]
         self.conv.train(was_training)
 
-        self.fc_mean = nn.Linear(self.fc_neurons, params["latent_dim"])
-        self.fc_log_variance = nn.Linear(self.fc_neurons, params["latent_dim"])
+        self.fc_mean = nn.Linear(self.fc_neurons, latent_dim)
+        self.fc_log_variance = nn.Linear(self.fc_neurons, latent_dim)
 
     def forward(self, x):
         x = self.conv(x)

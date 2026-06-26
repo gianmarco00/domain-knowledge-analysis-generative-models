@@ -37,7 +37,7 @@ class Vae(nn.Module):
         decoder_paddings = list(reversed(encoder_params["paddings"]))
 
         encoder_channels = [
-            encoder_params["in_channels"],
+            encoder.image_shape[0],
             *encoder_params["out_channels"],
         ]
 
