@@ -84,7 +84,7 @@ class Trainer:
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
 
-                if epoch % 10 == 0:
+                if epoch % 2 == 0:
                     self.generate_and_log_images("Images", epoch+1)
 
                 self.logger.flush()
