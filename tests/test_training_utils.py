@@ -50,7 +50,7 @@ def config(tmp_path):
         "optimizer": {
             "name": "adam",
         },
-        
+
         "seed": 42
     }
 
@@ -211,3 +211,32 @@ def test_create_dataloaders_returns_train_and_validation_loaders(monkeypatch, co
 
     assert x.shape == torch.Size([4, 1, 28, 28])
     assert y.shape == torch.Size([4])
+
+def test_create_log_dir_creates_directory(config):
+    log_dir = utils.create_log_dir(config)
+
+    assert log_dir.exists()
+    assert log_dir.is_dir()
+
+def test_create_dataset_does_not_download_if_mnist_already_exists(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+
+    dataset_dir = Path(config["paths"]["dataset_dir"])
+    processed_dir = dataset_dir / "MNIST" / "processed"
+    processed_dir.mkdir(parents=True)
+
+    training_file = processed_dir / "training.pt"
+    training_file.touch()
+
+    transform = utils.create_transform(config)
+    dataset = utils.create_dataset(config, transform)
+
+    assert dataset.download is False
+
+def test_create_dataset_downloads_if_mnist_is_missing(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+
+    transform = utils.create_transform(config)
+    dataset = utils.create_dataset(config, transform)
+
+    assert dataset.download is True

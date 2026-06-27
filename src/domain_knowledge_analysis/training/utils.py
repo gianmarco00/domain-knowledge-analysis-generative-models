@@ -154,9 +154,18 @@ def create_optimizer(config, model):
 
 def create_log_dir(config):
     runs_dir = Path(config["paths"]["runs_dir"])
-    run_name = build_run_name(config)
+    repo_root = get_repo_root()
+    runs_dir = repo_root / runs_dir
 
-    return runs_dir / run_name
+    run_name = build_run_name(config)
+    log_dir = runs_dir / run_name
+
+    if log_dir.exists() and not log_dir.is_dir():
+        raise NotADirectoryError(f"Log path exists but is not a directory: {log_dir}")
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    return log_dir
 
 def create_loss(config):
     model_name = config["model"]["name"].lower()
