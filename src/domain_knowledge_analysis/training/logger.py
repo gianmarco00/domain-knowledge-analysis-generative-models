@@ -11,8 +11,19 @@ class TensorBoardLogger:
 
     def log_images(self, name, images, step, num_images_to_log):
         images = images.detach().cpu()
+
+        print(
+            f"[TensorBoardLogger] Logging images | "
+            f"name={name} | step={step} | "
+            f"shape={tuple(images.shape)} | "
+            f"min={images.min().item():.4f} | "
+            f"max={images.max().item():.4f} | "
+            f"log_dir={self.log_dir}"
+        )
+
         grid = make_grid(images, nrow=num_images_to_log)
         self.writer.add_image(name, grid, step)
+        
 
     def flush(self):
         self.writer.flush()
