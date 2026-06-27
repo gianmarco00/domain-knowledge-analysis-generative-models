@@ -18,7 +18,7 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 60
+  epochs: 100
   learning_rate: 0.001
   start_weights: random
 
@@ -26,10 +26,10 @@ model:
   name: vae
 
   encoder:
-    latent_dim: 12
-    out_channels: [24, 24, 24, 24]
+    latent_dim: 32
+    out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
-    strides: [1, 2, 2, 1]
+    strides: [2, 2, 2, 1]
     paddings: [1, 1, 1, 1]
 
 optimizer:
