@@ -52,17 +52,33 @@ def create_transform(config):
     
     raise ValueError(f"Unsupported transform for dataset: {dataset_name}")
 
+def get_repo_root():
+
+    current_path = Path(__file__).resolve()
+    for parent in current_path.parents:
+        if (parent / "pyproject.toml").exists():
+            repo_root = parent
+            return repo_root
+ 
+    raise FileNotFoundError("Could not find repository root. Missing pyproject.toml.")
+    
 
 def create_dataset(config, transform):
     dataset_name = config["dataset"]["name"].lower()
+
     dataset_dir = config["paths"]["dataset_dir"]
+    repo_root = get_repo_root()
+    dataset_dir = Path(repo_root / dataset_dir)
+
     expected_shape = tuple(config["dataset"]["shape"])
 
     if dataset_name == "mnist":
+
+        download_needed = not (dataset_dir / "MNIST" / "processed" / "training.pt").exists()
         dataset = datasets.MNIST(
             root=dataset_dir,
             train=config["dataset"]["train"],
-            download=config["dataset"]["download"],
+            download=download_needed,
             transform=transform,
         )
 
