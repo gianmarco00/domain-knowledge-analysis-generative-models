@@ -5,9 +5,12 @@ description = "OOD detection signals for studying domain knowledge in generative
 requires-python = ">=3.10"
 dependencies = [
     "torch",
+    "torchvision",
+    "pyyaml",
+    "tensorboard",
+    "tqdm",
     "pytest",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

@@ -46,11 +46,20 @@ class Experiment():
     
     @staticmethod
     def print_tensorboard_instructions(log_dir):
+        runs_dir = log_dir.parent
+
         print("\nTensorBoard logs:")
-        print(f"  {log_dir}")
-        print("\nOn the GPU machine, run:")
-        print(f"  tensorboard --logdir {log_dir} --host localhost --port 6006")
-        print("\nFrom your Mac, open an SSH tunnel:")
-        print("  ssh -L 6006:localhost:6006 username@gpu_machine")
+        print(f"  Current run: {log_dir}")
+        print(f"  All runs:    {runs_dir}")
+        print("\nIn a second Clara terminal, attach to the Docker container:")
+        print("  cd /media/m2/Gianmarco_workspace/Generative_models/domain-knowledge-analysis-generative-models")
+        print("  ./torch_docker_up.sh")
+        print("\nInside the container, run TensorBoard:")
+        print(f"  tensorboard --logdir {runs_dir} --bind_all --port 6006")
+        print("\nFrom your Mac, open an SSH tunnel and keep it running:")
+        print("  ssh -N -L 16006:localhost:6006 horao@100.126.131.115")
         print("\nThen open on your Mac:")
-        print("  http://localhost:6006\n")
+        print("  http://localhost:16006")
+        print("\nIf the browser says connection refused, recreate the Docker container once:")
+        print("  ./torch_docker_down.sh")
+        print("  ./torch_docker_up.sh\n")
