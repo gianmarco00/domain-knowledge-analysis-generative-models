@@ -3,11 +3,16 @@ import torch.nn as nn
 from .encoder import Encoder
 from .decoder import Decoder
 
+from domain_knowledge_analysis.math.gaussian import sample_gaussian
+
 class Vae(nn.Module):
     def __init__(self, image_shape, encoder_params, decoder_params=None):
         super(Vae, self).__init__()
 
-        self.encoder = Encoder(image_shape, encoder_params)
+        self.image_shape = image_shape
+        self.encoder_params = encoder_params
+
+        self.encoder = Encoder(self.image_shape, encoder_params)
 
         if decoder_params is None:
             decoder_params = self.derive_decoder_params_from_encoder(self.encoder, encoder_params) 
@@ -24,6 +29,16 @@ class Vae(nn.Module):
         std = torch.exp(0.5*log_variance)
         eps = torch.randn_like(std)
         return mean + eps*std
+    
+    def generate_images(self, n_images):
+
+        device = next(self.parameters()).device
+       
+        z = torch.randn(n_images, self.encoder_params["latent_dim"]).to(device)
+        logits = self.decoder(z)
+        x = torch.sigmoid(logits)
+
+        return x
 
 
 

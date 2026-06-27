@@ -13,7 +13,12 @@ class Trainer:
         self.logger = logger
         self.checkpoint_manager = checkpoint_manager
 
+        self.num_images_to_log = 8
+
         self.model.to(self.device)
+
+        if start_weights != "random" and checkpoint_manager is None:
+            raise ValueError("Cannot load start_weights without a checkpoint_manager.")
 
         if start_weights != "random":
             checkpoint_manager.load_model(model, start_weights, device, optimizer)
@@ -76,14 +81,26 @@ class Trainer:
 
             if self.logger is not None:
 
-                self.logger.log_scalar("Loss/train", train_loss, epoch)
-                self.logger.log_scalar("Loss/validation", validation_loss, epoch)
+                self.logger.log_scalar("Loss/train", train_loss, epoch+1)
+                self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
+
+                if epoch % 10 == 0:
+                    self.generate_and_log_images(f"Generated samples for epoch {epoch}", epoch+1)
+
                 self.logger.flush()
 
         if self.checkpoint_manager is not None:
             self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history)
 
         if self.logger is not None:
+            self.generate_and_log_images(f"Generated samples for last epoch", epoch+1)
             self.logger.close()
 
         return self.history
+
+    def generate_and_log_images(self, name, epoch):
+        
+        self.model.eval()
+        with torch.no_grad():
+            images = self.model.generate_images(self.num_images_to_log)
+            self.logger.log_images(name, images, epoch, self.num_images_to_log)

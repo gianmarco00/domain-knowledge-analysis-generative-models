@@ -102,3 +102,12 @@ def test_vae_loss(batch_size=batch_size, image_shape=image_shape, encoder_params
     assert isinstance(loss, torch.Tensor), "Loss should be a torch.Tensor"
     assert loss.shape == torch.Size([]), f"Loss should be a scalar tensor and instead is of shape {loss.shape}"
 
+def test_generate_images(image_shape=image_shape, encoder_params=encoder_params):
+
+    vae = Vae(image_shape, encoder_params)
+
+    number_of_images = 5
+
+    x = vae.generate_images(number_of_images)
+
+    assert x.shape == torch.Size([number_of_images, *image_shape])
