@@ -85,7 +85,7 @@ class Trainer:
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
 
                 if epoch % 10 == 0:
-                    self.generate_and_log_images(f"Generated samples for epoch {epoch}", epoch+1)
+                    self.generate_and_log_images("Images", epoch+1)
 
                 self.logger.flush()
 
@@ -93,7 +93,7 @@ class Trainer:
             self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history)
 
         if self.logger is not None:
-            self.generate_and_log_images(f"Generated samples for last epoch", epoch+1)
+            self.generate_and_log_images(f"Images", epoch+1)
             self.logger.close()
 
         return self.history
