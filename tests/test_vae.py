@@ -16,6 +16,14 @@ encoder_params = {
     "in_channels": image_channels,
 }
 
+encoder_params = {
+    "latent_dim": 32,
+    "out_channels": [32, 64, 128, 128],
+    "kernels": [3, 3, 3, 3],
+    "strides": [1, 2, 2, 1],
+    "paddings": [1, 1, 1, 1],
+}
+
 image_shape = [image_channels, 28, 28]
 
 def test_encoder_returns_correct_shapes(batch_size=batch_size, image_shape=image_shape, encoder_params=encoder_params):
