@@ -1,6 +1,5 @@
 import torch
 from tqdm import tqdm
-from torch.utils.tensorboard import SummaryWriter
 
 class Trainer:
     def __init__(self, model, train_dataloader, validate_dataloader, optimizer, loss, epochs, device, logger=None):
