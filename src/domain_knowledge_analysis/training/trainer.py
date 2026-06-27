@@ -2,7 +2,7 @@ import torch
 from tqdm import tqdm
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, loss, epochs, device, logger=None):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
@@ -11,10 +11,12 @@ class Trainer:
         self.epochs = epochs
         self.device = device
         self.logger = logger
+        self.checkpoint_manager = checkpoint_manager
 
         self.model.to(self.device)
 
-        
+        if start_weights != "random":
+            checkpoint_manager.load_model(model, start_weights, device, optimizer)
 
         self.history = {
             "train_loss": [],
@@ -77,6 +79,9 @@ class Trainer:
                 self.logger.log_scalar("Loss/train", train_loss, epoch)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch)
                 self.logger.flush()
+
+        if self.checkpoint_manager is not None:
+            self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history)
 
         if self.logger is not None:
             self.logger.close()

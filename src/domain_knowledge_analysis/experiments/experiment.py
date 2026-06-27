@@ -1,4 +1,4 @@
-from domain_knowledge_analysis.training import utils, Trainer, TensorBoardLogger
+from domain_knowledge_analysis.training import utils, Trainer, TensorBoardLogger, CheckpointManager
 
 
 class Experiment():
@@ -18,12 +18,15 @@ class Experiment():
 
         train_dataloader, validation_dataloader = utils.create_dataloaders(self.config)
 
+        loss = utils.create_loss(self.config)
+
         log_dir = utils.create_log_dir(self.config)
         logger = TensorBoardLogger(log_dir)
 
+        checkpoint_manager = CheckpointManager(log_dir)
+
         self.print_tensorboard_instructions(log_dir)
 
-        loss = utils.create_loss(self.config)
 
         trainer = Trainer(
             model=model,
@@ -33,7 +36,9 @@ class Experiment():
             loss=loss,
             epochs=self.config["training"]["epochs"],
             device=device,
+            checkpoint_manager=checkpoint_manager,
             logger=logger,
+            start_weights=self.config["training"]["start_weights"]
         )
 
         self.history = trainer.fit()

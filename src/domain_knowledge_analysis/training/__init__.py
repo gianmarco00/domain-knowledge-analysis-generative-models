@@ -1,5 +1,6 @@
 from .trainer import Trainer
 from .logger import TensorBoardLogger
+from .checkpoints import CheckpointManager
 from .utils import (
     load_config,
     set_seed,
@@ -29,5 +30,6 @@ __all__ = [
     "create_optimizer",
     "create_log_dir",
     "create_loss",
-    "TensorBoardLogger"
+    "TensorBoardLogger",
+    "CheckpointManager"
 ]
