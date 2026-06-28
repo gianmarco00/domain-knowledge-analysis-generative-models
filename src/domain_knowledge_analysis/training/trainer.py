@@ -32,6 +32,7 @@ class Trainer:
 
         self.model.train()
         total_loss = 0
+        total_samples = 0
 
         for batch in self.train_dataloader:
 
@@ -42,14 +43,16 @@ class Trainer:
             loss_value.backward()
             self.optimizer.step()
 
-            total_loss += loss_value.item()
+            total_loss += loss_value.item() * len(x)
+            total_samples += len(x)
 
-        return total_loss / len(self.train_dataloader)
+        return total_loss / total_samples
     
     def validate_epoch(self):
 
         self.model.eval()
         total_loss = 0
+        total_samples = 0
 
         with torch.no_grad():
             for batch in self.validate_dataloader:
@@ -58,9 +61,10 @@ class Trainer:
                 logits, mean, log_variance = self.model(x)
                 loss_value = self.loss(x, logits, mean, log_variance)
 
-                total_loss += loss_value.item()
+                total_loss += loss_value.item() * len(x)
+                total_samples += len(x)
 
-        return total_loss / len(self.validate_dataloader)
+        return total_loss / total_samples
     
     def fit(self):
 
