@@ -9,6 +9,6 @@ def vae_loss(x, logits, mean, log_variance):
 
     elbo_loss_per_image = elbo(reconstruction_loss, kl_loss)
 
-    elbo_loss = torch.mean(elbo_loss_per_image)
+    elbo_loss = torch.sum(elbo_loss_per_image)
 
     return -elbo_loss
