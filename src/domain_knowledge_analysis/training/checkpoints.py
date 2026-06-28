@@ -1,11 +1,14 @@
 import torch
 
 class CheckpointManager():
-    def __init__(self, log_dir):
+    def __init__(self, log_dir, config):
 
         self.log_dir = log_dir
+        self.config = config
+
         self.checkpoint_dir = log_dir / "checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
 
     def checkpoint_path(self, filename):
         return self.checkpoint_dir / filename
@@ -17,6 +20,7 @@ class CheckpointManager():
             "optimizer_state_dict": optimizer.state_dict(),
             "epoch": epoch,
             "history": history,
+            "config": self.config
         },
         self.checkpoint_path(filename)
         )
