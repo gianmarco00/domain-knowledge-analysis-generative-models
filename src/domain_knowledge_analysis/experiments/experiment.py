@@ -22,7 +22,7 @@ class Experiment():
 
         self.model = utils.create_model(self.config)
 
-        self.pretrained_model_path = utils.get_repo_root() / self.config["scoring"]["pretrained_model"]
+        self.pretrained_model_path = utils.get_repo_root() / self.config["scoring"]["pretrained_model"] if self.config["scoring"]["pretrained_model"] else None
 
         
     def train(self):

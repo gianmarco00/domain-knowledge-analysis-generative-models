@@ -7,10 +7,8 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "vae_mnis
 
 
 def main():
-
     experiment = Experiment(DEFAULT_CONFIG_PATH)
-
-    experiment.train()
+    experiment.score()
 
 
 if __name__ == "__main__":
