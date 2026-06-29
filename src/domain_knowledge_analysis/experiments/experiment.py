@@ -2,6 +2,8 @@ from domain_knowledge_analysis.training import utils, Trainer, TensorBoardLogger
 from domain_knowledge_analysis.scoring import Scorer
 from domain_knowledge_analysis.plotting import Plotter
 
+from pathlib import Path
+
 
 class Experiment():
     def __init__(self, config_path):
@@ -19,6 +21,8 @@ class Experiment():
         print(f"Using device: {self.device}")
 
         self.model = utils.create_model(self.config)
+
+        self.pretrained_model_path = utils.get_repo_root() / self.config["scoring"]["pretrained_model"]
 
         
     def train(self):
@@ -50,10 +54,9 @@ class Experiment():
         return self.model
     
     def score(self):
-        pretrained_model_path = self.config["scoring"]["pretrained_model"]
 
-        if pretrained_model_path:
-            self.model = self.checkpoint_manager.load_model(self.model, pretrained_model_path, self.device)
+        if self.pretrained_model_path:
+            self.model = self.checkpoint_manager.load_model(self.model, self.pretrained_model_path, self.device)
             training_dataset_name = self.checkpoint_manager.training_dataset
 
         else:
@@ -78,7 +81,7 @@ class Experiment():
 
         results = scorer.score()
 
-        results_log_dir = self.get_results_log_dir(pretrained_model_path)
+        results_log_dir = self.get_results_log_dir(self.pretrained_model_path)
         plotter = Plotter(results_log_dir)
 
         plotter.plot(
