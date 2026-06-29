@@ -1,4 +1,4 @@
-from domain_knowledge_analysis.math import elbo, bernoulli_log_prob_from_logits, kl_divergence
+from domain_knowledge_analysis.math import elbo_per_image, bernoulli_log_prob_from_logits, kl_divergence
 import torch
 
 def vae_loss(x, logits, mean, log_variance):
@@ -7,7 +7,7 @@ def vae_loss(x, logits, mean, log_variance):
 
     kl_loss = kl_divergence(mean, log_variance)
 
-    elbo_loss_per_image = elbo(reconstruction_loss, kl_loss)
+    elbo_loss_per_image = elbo_per_image(reconstruction_loss, kl_loss)
 
     elbo_loss = torch.mean(elbo_loss_per_image)
 

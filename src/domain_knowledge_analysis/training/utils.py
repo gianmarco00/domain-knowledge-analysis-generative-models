@@ -43,11 +43,9 @@ def get_device():
     return torch.device("cpu")
 
 
-def create_transform(config):
+def create_transform(dataset_name):
 
-    dataset_name = config["dataset"]["name"].lower()
-
-    if dataset_name == "mnist":
+    if dataset_name in ["mnist", "fashionmnist", "fashion_mnist", "fmnist"]:
         return transforms.ToTensor()
     
     raise ValueError(f"Unsupported transform for dataset: {dataset_name}")
@@ -63,8 +61,10 @@ def get_repo_root():
     raise FileNotFoundError("Could not find repository root. Missing pyproject.toml.")
     
 
-def create_dataset(config, transform):
-    dataset_name = config["dataset"]["name"].lower()
+def create_dataset(config, dataset_name, train):
+    dataset_name = dataset_name.lower()
+
+    transform = create_transform(dataset_name=dataset_name)
 
     dataset_dir = config["paths"]["dataset_dir"]
     repo_root = get_repo_root()
@@ -73,31 +73,49 @@ def create_dataset(config, transform):
     expected_shape = tuple(config["dataset"]["shape"])
 
     if dataset_name == "mnist":
+        dataset_class = datasets.MNIST
+        processed_folder = "MNIST"
 
-        download_needed = not (dataset_dir / "MNIST" / "processed" / "training.pt").exists()
-        dataset = datasets.MNIST(
-            root=dataset_dir,
-            train=config["dataset"]["train"],
-            download=download_needed,
-            transform=transform,
+    elif dataset_name in ["fashion_mnist", "fmnist"]:
+        dataset_class = datasets.FashionMNIST
+        processed_folder = "FashionMNIST"
+
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+
+    processed_dir = dataset_dir / processed_folder / "processed"
+
+    download_needed = not (
+        (processed_dir / "training.pt").exists()
+        and (processed_dir / "test.pt").exists()
+    )
+
+    dataset = dataset_class(
+        root=dataset_dir,
+        train=train,
+        download=download_needed,
+        transform=transform,
+    )
+
+    actual_shape = tuple(dataset[0][0].shape)
+
+    if actual_shape != expected_shape:
+        raise ValueError(
+            f"Config file contains wrong data shape. "
+            f"Expected {expected_shape}, got {actual_shape}."
         )
 
-        actual_shape = tuple(dataset[0][0].shape)
-
-        if actual_shape != expected_shape:
-            raise ValueError(
-                f"Config file contains wrong data shape. "
-                f"Expected {expected_shape}, got {actual_shape}."
-            )
-
-        return dataset
-
-    raise ValueError(f"Unsupported dataset: {dataset_name}")
+    return dataset
 
 
-def create_dataloaders(config):
-    transform = create_transform(config)
-    dataset = create_dataset(config, transform)
+def create_training_dataloaders(config):
+
+    dataset_name = config["dataset"]["name"].lower()
+    dataset = create_dataset(
+        config, 
+        dataset_name, 
+        train=True
+    )
 
     train_split = config["dataset"]["train_split"]
     train_size = int(train_split * len(dataset))
@@ -128,6 +146,43 @@ def create_dataloaders(config):
     )
 
     return train_dataloader, validation_dataloader
+
+def create_scoring_dataloaders(
+    config,
+    in_distribution_dataset_name,
+    out_distribution_dataset_name,
+):
+
+    in_distribution_dataset = create_dataset(
+        config=config,
+        dataset_name=in_distribution_dataset_name,
+        train=False,
+    )
+
+    out_distribution_dataset = create_dataset(
+        config=config,
+        dataset_name=out_distribution_dataset_name,
+        train=False,
+    )
+
+    dataloader_config = config["scoring"]["dataloader"]
+
+    in_distribution_dataloader = DataLoader(
+        in_distribution_dataset,
+        batch_size=dataloader_config["batch_size"],
+        shuffle=False,
+        num_workers=dataloader_config["num_workers"],
+    )
+
+    out_distribution_dataloader = DataLoader(
+        out_distribution_dataset,
+        batch_size=dataloader_config["batch_size"],
+        shuffle=False,
+        num_workers=dataloader_config["num_workers"],
+    )
+
+    return in_distribution_dataloader, out_distribution_dataloader
+
 
 
 

@@ -1,7 +1,7 @@
 import torch
 
 class CheckpointManager():
-    def __init__(self, log_dir, config):
+    def __init__(self, log_dir, config=None):
 
         self.log_dir = log_dir
         self.config = config
@@ -29,13 +29,28 @@ class CheckpointManager():
 
         self.save_checkpoint(model, optimizer, epoch, history, filename="last.pt")
 
-    def load_model(self, model, checkpoint_path, device, optimizer=None):
 
+    def load_model(self, model, checkpoint_path, device, optimizer=None):
         checkpoint = torch.load(checkpoint_path, map_location=device)
+
+        self.model_config = checkpoint["config"]
+
+        if self.config is not None:
+            if self.model_config["model"] != self.config["model"]:
+                raise ValueError(
+                    "Pretrained model architecture differs from current model architecture.\n"
+                    f"Checkpoint model config:\n{self.model_config['model']}\n"
+                    f"Current model config:\n{self.config['model']}"
+                )
+
+        self.training_dataset = self.model_config["dataset"]["name"]
+
         model.load_state_dict(checkpoint["model_state_dict"])
 
-        if optimizer:
+        if optimizer is not None:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        return model
         
 
     

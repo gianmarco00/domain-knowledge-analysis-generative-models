@@ -1,7 +1,52 @@
 import torch
 from pathlib import Path
+import pytest
 
 from domain_knowledge_analysis.training import CheckpointManager
+
+@pytest.fixture
+def config(tmp_path):
+    return {
+        "experiment": {
+            "name": "vae_mnist_test",
+        },
+        "paths": {
+            "dataset_dir": str(tmp_path / "datasets"),
+            "runs_dir": str(tmp_path / "runs"),
+        },
+        "dataset": {
+            "name": "mnist",
+            "train": True,
+            "download": False,
+            "train_split": 0.8,
+            "shape": [1, 28, 28],
+        },
+        "dataloader": {
+            "batch_size": 4,
+            "shuffle_train": True,
+            "shuffle_validation": False,
+            "num_workers": 0,
+        },
+        "training": {
+            "epochs": 2,
+            "learning_rate": 0.001,
+        },
+        "model": {
+            "name": "vae",
+            "encoder": {
+                "out_channels": [24, 24, 24, 24],
+                "kernels": [3, 3, 3, 3],
+                "strides": [1, 2, 2, 1],
+                "paddings": [1, 1, 1, 1],
+                "latent_dim": 12
+            },
+        },
+        "optimizer": {
+            "name": "adam",
+        },
+
+        "seed": 42
+    }
 
 
 def test_checkpoint_manager_creates_checkpoint_directory(tmp_path):
@@ -56,8 +101,8 @@ def test_saved_checkpoint_contains_required_keys(tmp_path):
     assert checkpoint["history"] == history
 
 
-def test_load_model_restores_model_weights(tmp_path):
-    checkpoint_manager = CheckpointManager(tmp_path)
+def test_load_model_restores_model_weights(tmp_path, config):
+    checkpoint_manager = CheckpointManager(tmp_path, config)
 
     model = torch.nn.Linear(2, 1)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)

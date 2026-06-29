@@ -35,4 +35,17 @@ model:
 optimizer:
   name: adam
 
+
+scoring:
+  pretrained_model: null
+  out_distribution_dataset: fashion_mnist
+
+  dataloader:
+    batch_size: 128
+    num_workers: 0
+
+  signals:
+    likelihood:
+      enabled: true
+
 seed: 42

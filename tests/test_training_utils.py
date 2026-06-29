@@ -121,7 +121,8 @@ def test_get_device_returns_torch_device():
 
 
 def test_create_transform_for_mnist(config):
-    transform = utils.create_transform(config)
+    dataset_name = config["dataset"]["name"]
+    transform = utils.create_transform(dataset_name)
 
     assert transform is not None
 
@@ -178,8 +179,10 @@ def test_create_log_dir_uses_runs_dir(config):
 def test_create_dataset_returns_dataset_with_expected_shape(monkeypatch, config):
     monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
 
-    transform = utils.create_transform(config)
-    dataset = utils.create_dataset(config, transform)
+    dataset_name = config["dataset"]["name"]
+
+    transform = utils.create_transform(dataset_name)
+    dataset = utils.create_dataset(config, dataset_name, transform)
 
     image, label = dataset[0]
 
@@ -192,17 +195,18 @@ def test_create_dataset_raises_if_shape_is_wrong(monkeypatch, config):
     monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
 
     config["dataset"]["shape"] = [3, 28, 28]
+    dataset_name = config["dataset"]["name"]
 
-    transform = utils.create_transform(config)
+    transform = utils.create_transform(dataset_name)
 
     with pytest.raises(ValueError, match="wrong data shape"):
-        utils.create_dataset(config, transform)
+        utils.create_dataset(config, dataset_name, transform)
 
 
-def test_create_dataloaders_returns_train_and_validation_loaders(monkeypatch, config):
+def test_create_training_dataloaders_returns_train_and_validation_loaders(monkeypatch, config):
     monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
 
-    train_dataloader, validation_dataloader = utils.create_dataloaders(config)
+    train_dataloader, validation_dataloader = utils.create_training_dataloaders(config)
 
     assert len(train_dataloader.dataset) == 16
     assert len(validation_dataloader.dataset) == 4
@@ -221,22 +225,94 @@ def test_create_log_dir_creates_directory(config):
 def test_create_dataset_does_not_download_if_mnist_already_exists(monkeypatch, config):
     monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
 
+    dataset_name = config["dataset"]["name"]
+
     dataset_dir = Path(config["paths"]["dataset_dir"])
     processed_dir = dataset_dir / "MNIST" / "processed"
     processed_dir.mkdir(parents=True)
 
-    training_file = processed_dir / "training.pt"
-    training_file.touch()
+    (processed_dir / "training.pt").touch()
+    (processed_dir / "test.pt").touch()
 
-    transform = utils.create_transform(config)
-    dataset = utils.create_dataset(config, transform)
+    dataset = utils.create_dataset(
+        config=config,
+        dataset_name=dataset_name,
+        train=True,
+    )
 
     assert dataset.download is False
+
+def test_create_dataset_downloads_if_mnist_test_file_is_missing(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+
+    dataset_name = config["dataset"]["name"]
+
+    dataset_dir = Path(config["paths"]["dataset_dir"])
+    processed_dir = dataset_dir / "MNIST" / "processed"
+    processed_dir.mkdir(parents=True)
+
+    (processed_dir / "training.pt").touch()
+
+    dataset = utils.create_dataset(
+        config=config,
+        dataset_name=dataset_name,
+        train=False,
+    )
+
+    assert dataset.download is True
 
 def test_create_dataset_downloads_if_mnist_is_missing(monkeypatch, config):
     monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
 
-    transform = utils.create_transform(config)
-    dataset = utils.create_dataset(config, transform)
+    dataset_name = config["dataset"]["name"]
+
+    transform = utils.create_transform(dataset_name)
+    dataset = utils.create_dataset(config, dataset_name, transform)
 
     assert dataset.download is True
+
+def test_create_scoring_dataloaders_creates_test_dataloaders(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+    monkeypatch.setattr(utils.datasets, "FashionMNIST", DummyImageDataset)
+
+    config["scoring"] = {
+        "dataloader": {
+            "batch_size": 3,
+            "num_workers": 0,
+        }
+    }
+
+    in_dataloader, out_dataloader = utils.create_scoring_dataloaders(
+        config=config,
+        in_distribution_dataset_name="mnist",
+        out_distribution_dataset_name="fashion_mnist",
+    )
+
+    assert in_dataloader.batch_size == 3
+    assert out_dataloader.batch_size == 3
+
+    assert in_dataloader.dataset.train is False
+    assert out_dataloader.dataset.train is False
+
+def test_create_scoring_dataloaders_return_batches_with_expected_shape(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+    monkeypatch.setattr(utils.datasets, "FashionMNIST", DummyImageDataset)
+
+    config["scoring"] = {
+        "dataloader": {
+            "batch_size": 4,
+            "num_workers": 0,
+        }
+    }
+
+    in_dataloader, out_dataloader = utils.create_scoring_dataloaders(
+        config=config,
+        in_distribution_dataset_name="mnist",
+        out_distribution_dataset_name="fashion_mnist",
+    )
+
+    in_batch = next(iter(in_dataloader))[0]
+    out_batch = next(iter(out_dataloader))[0]
+
+    assert in_batch.shape == (4, 1, 28, 28)
+    assert out_batch.shape == (4, 1, 28, 28)

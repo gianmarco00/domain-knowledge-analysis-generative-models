@@ -1,4 +1,6 @@
 from domain_knowledge_analysis.training import utils, Trainer, TensorBoardLogger, CheckpointManager
+from domain_knowledge_analysis.scoring import Scorer
+from domain_knowledge_analysis.plotting import Plotter
 
 
 class Experiment():
@@ -7,42 +9,95 @@ class Experiment():
         self.config = utils.load_config(config_path)
         utils.set_seed(self.config["seed"])
 
+        self.log_dir = utils.create_log_dir(self.config)
+
+        self.logger = TensorBoardLogger(self.log_dir)
+
+        self.checkpoint_manager = CheckpointManager(self.log_dir, self.config)
+
+        self.device = utils.get_device()
+        print(f"Using device: {self.device}")
+
+        self.model = utils.create_model(self.config)
+
         
     def train(self):
-        
-        device = utils.get_device()
-        print(f"Using device: {device}")
 
-        model = utils.create_model(self.config)
-        optimizer = utils.create_optimizer(self.config, model)
+        optimizer = utils.create_optimizer(self.config, self.model)
 
-        train_dataloader, validation_dataloader = utils.create_dataloaders(self.config)
+        train_dataloader, validation_dataloader = utils.create_training_dataloaders(self.config)
 
         loss = utils.create_loss(self.config)
 
-        log_dir = utils.create_log_dir(self.config)
-        logger = TensorBoardLogger(log_dir)
-
-        checkpoint_manager = CheckpointManager(log_dir)
-
-        self.print_tensorboard_instructions(log_dir)
+        self.print_tensorboard_instructions(self.log_dir)
 
 
         trainer = Trainer(
-            model=model,
+            model=self.model,
             train_dataloader=train_dataloader,
             validate_dataloader=validation_dataloader,
             optimizer=optimizer,
             loss=loss,
             epochs=self.config["training"]["epochs"],
-            device=device,
-            checkpoint_manager=checkpoint_manager,
-            logger=logger,
+            device=self.device,
+            checkpoint_manager=self.checkpoint_manager,
+            logger=self.logger,
             start_weights=self.config["training"]["start_weights"]
         )
 
-        self.history = trainer.fit()
+        trainer.fit()
 
+        return self.model
+    
+    def score(self):
+        pretrained_model_path = self.config["scoring"]["pretrained_model"]
+
+        if pretrained_model_path:
+            self.model = self.checkpoint_manager.load_model(self.model, pretrained_model_path, self.device)
+            training_dataset_name = self.checkpoint_manager.training_dataset
+
+        else:
+            self.model = self.train()
+            training_dataset_name = self.config["dataset"]["name"]
+
+        out_distribution_dataset_name = self.config["scoring"]["out_distribution_dataset"]
+
+        in_distribution_dataloader, out_distribution_dataloader = utils.create_scoring_dataloaders(
+            config=self.config,
+            in_distribution_dataset_name=training_dataset_name,
+            out_distribution_dataset_name=out_distribution_dataset_name,
+        )
+
+        scorer = Scorer(
+            model=self.model,
+            in_distribution_dataloader=in_distribution_dataloader,
+            out_distribution_dataloader=out_distribution_dataloader,
+            config=self.config,
+            device=self.device,
+        )
+
+        results = scorer.score()
+
+        results_log_dir = self.get_results_log_dir(pretrained_model_path)
+        plotter = Plotter(results_log_dir)
+
+        plotter.plot(
+            results=results,
+            in_distribution_name=training_dataset_name,
+            out_distribution_name=out_distribution_dataset_name,
+            title=f"Trained on {training_dataset_name.upper()}",
+        )
+
+        return results
+
+
+    def get_results_log_dir(self, pretrained_model_path):
+
+        if pretrained_model_path:
+            checkpoint_path = Path(pretrained_model_path)
+            return checkpoint_path.parent.parent
+
+        return self.log_dir
     
     @staticmethod
     def print_tensorboard_instructions(log_dir):

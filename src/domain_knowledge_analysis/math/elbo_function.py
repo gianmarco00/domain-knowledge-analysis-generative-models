@@ -1,6 +1,6 @@
 import torch
 
-def elbo(reconstruction_term, kl_divergence_term):
+def elbo_per_image(reconstruction_term, kl_divergence_term):
     """
     Computes the Evidence Lower Bound (ELBO) given the reconstruction term and KL divergence term.
 

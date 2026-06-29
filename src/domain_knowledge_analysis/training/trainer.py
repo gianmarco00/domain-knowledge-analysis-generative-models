@@ -21,7 +21,7 @@ class Trainer:
             raise ValueError("Cannot load start_weights without a checkpoint_manager.")
 
         if start_weights != "random":
-            checkpoint_manager.load_model(model, start_weights, device, optimizer)
+            self.model = checkpoint_manager.load_model(self.model, start_weights, self.device, self.optimizer)
 
         self.history = {
             "train_loss": [],
