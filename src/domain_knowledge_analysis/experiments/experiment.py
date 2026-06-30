@@ -71,10 +71,16 @@ class Experiment():
             out_distribution_dataset_name=out_distribution_dataset_name,
         )
 
+        calibration_dataloader = utils.create_calibration_dataloader(
+            config=self.config,
+            dataset_name=training_dataset_name
+        )
+
         scorer = Scorer(
             model=self.model,
             in_distribution_dataloader=in_distribution_dataloader,
             out_distribution_dataloader=out_distribution_dataloader,
+            calibration_dataloader=calibration_dataloader,
             config=self.config,
             device=self.device,
         )

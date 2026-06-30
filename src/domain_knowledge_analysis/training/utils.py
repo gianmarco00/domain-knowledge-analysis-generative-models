@@ -183,7 +183,23 @@ def create_scoring_dataloaders(
 
     return in_distribution_dataloader, out_distribution_dataloader
 
+def create_calibration_dataloader(config, dataset_name):
+    dataset = create_dataset(
+        config=config,
+        dataset_name=dataset_name,
+        train=True,
+    )
 
+    dataloader_config = config["scoring"]["dataloader"]
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=dataloader_config["batch_size"],
+        shuffle=False,
+        num_workers=dataloader_config["num_workers"],
+    )
+
+    return dataloader
 
 
 def create_model(config):

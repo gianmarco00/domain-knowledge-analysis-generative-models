@@ -1,6 +1,6 @@
 import torch
 
-from domain_knowledge_analysis.scoring.signals import NLLEstimator
+from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator
 
 
 class Scorer:
@@ -9,12 +9,14 @@ class Scorer:
         model,
         in_distribution_dataloader,
         out_distribution_dataloader,
+        calibration_dataloader,
         config,
         device,
     ):
         self.model = model
         self.in_distribution_dataloader = in_distribution_dataloader
         self.out_distribution_dataloader = out_distribution_dataloader
+        self.calibration_dataloader = calibration_dataloader
         self.config = config
         self.device = device
 
@@ -32,10 +34,25 @@ class Scorer:
                 model_architecture=self.config["model"]["name"].lower(),
             )
 
+        if signal_config["typicality"]["enabled"]:
+            estimators["typicality"] = TypicalityEstimator(
+                model=self.model,
+                model_architecture=self.config["model"]["name"].lower(),
+                calibration_dataloader=self.calibration_dataloader
+            )
+
         return estimators
+    
+    def calibrate_estimators(self):
+
+        for estimator in self.estimators.values():
+            if hasattr(estimator, "calibrate"):
+                estimator.calibrate()
 
     def score(self):
         results = {}
+
+        self.calibrate_estimators()
 
         for signal_name, estimator in self.estimators.items():
             in_distribution_scores = self.score_dataloader(
