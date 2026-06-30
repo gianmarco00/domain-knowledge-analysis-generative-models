@@ -15,24 +15,24 @@ class TypicalityEstimator():
         self.entropy_estimate = None
 
     def calibrate(self):
-
-        nll_total = 0
+        nll_total = torch.tensor(0.0, device=self.device)
         nll_count = 0
 
         for batch in self.calibration_dataloader:
-
             x = batch[0].to(self.device)
             nll_batch = self.nll_estimator.estimate(x)
 
-            nll_total += torch.sum(nll_batch, dim=0)
+            nll_total += torch.sum(nll_batch)
             nll_count += nll_batch.numel()
 
         self.entropy_estimate = nll_total / nll_count
+
+        return self.entropy_estimate
         
 
     def estimate(self, x):
 
-        if self.entropy_estimate == None:
+        if self.entropy_estimate is None:
             raise ValueError("Typicality estimator was not calibrated")
 
         nll_per_image = self.nll_estimator.estimate(x)

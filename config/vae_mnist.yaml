@@ -47,5 +47,8 @@ scoring:
   signals:
     likelihood:
       enabled: true
+    typicality:
+      enabled: true
+
 
 seed: 42
