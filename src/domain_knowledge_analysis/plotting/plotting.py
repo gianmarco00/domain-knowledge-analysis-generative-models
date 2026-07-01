@@ -78,37 +78,56 @@ class Plotter:
             signal_results["out_distribution"]
         )
 
-        x_min, x_max = self._get_plot_range(
-            in_distribution_scores=in_distribution_scores,
-            out_distribution_scores=out_distribution_scores,
-            zoom=zoom,
-        )
-
-        bin_edges = torch.linspace(x_min, x_max, bins + 1)
-
         save_path = self.output_dir / filename
 
         plt.figure(figsize=(7, 6))
 
-        plt.hist(
-            in_distribution_scores.numpy(),
-            bins=bin_edges.numpy(),
-            alpha=alpha,
-            density=True,
-            label=in_distribution_name.upper(),
-        )
+        if zoom:
+            x_min, x_max = self._get_plot_range(
+                in_distribution_scores=in_distribution_scores,
+                out_distribution_scores=out_distribution_scores,
+                zoom=True,
+            )
 
-        plt.hist(
-            out_distribution_scores.numpy(),
-            bins=bin_edges.numpy(),
-            alpha=alpha,
-            density=True,
-            label=out_distribution_name.upper(),
-        )
+            bin_edges = torch.linspace(x_min, x_max, bins + 1).numpy()
+
+            plt.hist(
+                in_distribution_scores.numpy(),
+                bins=bin_edges,
+                alpha=alpha,
+                density=True,
+                label=in_distribution_name.upper(),
+            )
+
+            plt.hist(
+                out_distribution_scores.numpy(),
+                bins=bin_edges,
+                alpha=alpha,
+                density=True,
+                label=out_distribution_name.upper(),
+            )
+
+            plt.ylabel("density")
+
+        else:
+            plt.hist(
+                in_distribution_scores.numpy(),
+                bins=bins,
+                alpha=alpha,
+                label=in_distribution_name.upper(),
+            )
+
+            plt.hist(
+                out_distribution_scores.numpy(),
+                bins=bins,
+                alpha=alpha,
+                label=out_distribution_name.upper(),
+            )
+
+            plt.ylabel("# of samples")
 
         plt.title(title, fontsize=18)
         plt.xlabel(self._format_signal_name(signal_name))
-        plt.ylabel("# of samples")
         plt.legend()
         plt.tight_layout()
         plt.savefig(save_path)
