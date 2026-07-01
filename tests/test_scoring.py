@@ -2,13 +2,14 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from domain_knowledge_analysis.scoring.signals import NLLEstimator
+from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator
 from domain_knowledge_analysis.scoring import Scorer
 
 
 class DummyVae(torch.nn.Module):
     def __init__(self):
         super().__init__()
+        self.dummy_parameter = torch.nn.Parameter(torch.zeros(1))
         self.eval_was_called = False
 
     def eval(self):
@@ -25,6 +26,23 @@ class DummyVae(torch.nn.Module):
         return logits, mean, log_variance
 
 
+def expected_dummy_nll(batch_size):
+    return torch.full(
+        size=(batch_size,),
+        fill_value=4 * torch.log(torch.tensor(2.0)),
+    )
+
+
+def make_dataloader(num_samples, batch_size):
+    x = torch.zeros(num_samples, 1, 2, 2)
+
+    return DataLoader(
+        TensorDataset(x),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+
 def test_nll_estimator_returns_negative_elbo_per_image_for_vae():
     model = DummyVae()
     estimator = NLLEstimator(model=model, model_architecture="vae")
@@ -33,13 +51,8 @@ def test_nll_estimator_returns_negative_elbo_per_image_for_vae():
 
     scores = estimator.estimate(x)
 
-    expected_score_per_image = torch.full(
-        size=(3,),
-        fill_value=4 * torch.log(torch.tensor(2.0)),
-    )
-
     assert scores.shape == (3,)
-    assert torch.allclose(scores, expected_score_per_image)
+    assert torch.allclose(scores.cpu(), expected_dummy_nll(batch_size=3))
     assert model.eval_was_called
 
 
@@ -64,23 +77,86 @@ def test_nll_estimator_rejects_unsupported_model_architecture():
         estimator.estimate(x)
 
 
-def test_scorer_returns_scores_for_both_datasets():
+def test_typicality_estimator_calibrates_entropy_estimate():
+    model = DummyVae()
+    calibration_dataloader = make_dataloader(num_samples=5, batch_size=2)
+
+    estimator = TypicalityEstimator(
+        model=model,
+        model_architecture="vae",
+        calibration_dataloader=calibration_dataloader,
+    )
+
+    entropy_estimate = estimator.calibrate()
+
+    expected_entropy = 4 * torch.log(torch.tensor(2.0))
+
+    assert torch.allclose(entropy_estimate.cpu(), expected_entropy)
+
+
+def test_typicality_estimator_requires_calibration_before_estimate():
+    model = DummyVae()
+    calibration_dataloader = make_dataloader(num_samples=5, batch_size=2)
+
+    estimator = TypicalityEstimator(
+        model=model,
+        model_architecture="vae",
+        calibration_dataloader=calibration_dataloader,
+    )
+
+    x = torch.zeros(3, 1, 2, 2)
+
+    with pytest.raises(ValueError, match="not calibrated"):
+        estimator.estimate(x)
+
+
+def test_typicality_estimator_returns_zero_when_nll_equals_entropy():
+    model = DummyVae()
+    calibration_dataloader = make_dataloader(num_samples=5, batch_size=2)
+
+    estimator = TypicalityEstimator(
+        model=model,
+        model_architecture="vae",
+        calibration_dataloader=calibration_dataloader,
+    )
+
+    estimator.calibrate()
+
+    x = torch.zeros(3, 1, 2, 2)
+
+    scores = estimator.estimate(x)
+
+    assert scores.shape == (3,)
+    assert torch.allclose(scores.cpu(), torch.zeros(3))
+
+
+def test_typicality_estimator_uses_absolute_difference():
+    model = DummyVae()
+    calibration_dataloader = make_dataloader(num_samples=5, batch_size=2)
+
+    estimator = TypicalityEstimator(
+        model=model,
+        model_architecture="vae",
+        calibration_dataloader=calibration_dataloader,
+    )
+
+    nll_value = 4 * torch.log(torch.tensor(2.0))
+    estimator.entropy_estimate = nll_value + 1.0
+
+    x = torch.zeros(3, 1, 2, 2)
+
+    scores = estimator.estimate(x)
+
+    assert scores.shape == (3,)
+    assert torch.allclose(scores.cpu(), torch.ones(3))
+
+
+def test_scorer_returns_likelihood_scores_for_both_datasets():
     model = DummyVae()
 
-    in_distribution_x = torch.zeros(5, 1, 2, 2)
-    out_distribution_x = torch.zeros(7, 1, 2, 2)
-
-    in_distribution_dataloader = DataLoader(
-        TensorDataset(in_distribution_x),
-        batch_size=2,
-        shuffle=False,
-    )
-
-    out_distribution_dataloader = DataLoader(
-        TensorDataset(out_distribution_x),
-        batch_size=3,
-        shuffle=False,
-    )
+    in_distribution_dataloader = make_dataloader(num_samples=5, batch_size=2)
+    out_distribution_dataloader = make_dataloader(num_samples=7, batch_size=3)
+    calibration_dataloader = make_dataloader(num_samples=6, batch_size=2)
 
     config = {
         "model": {
@@ -90,7 +166,10 @@ def test_scorer_returns_scores_for_both_datasets():
             "signals": {
                 "likelihood": {
                     "enabled": True,
-                }
+                },
+                "typicality": {
+                    "enabled": False,
+                },
             }
         },
     }
@@ -99,6 +178,7 @@ def test_scorer_returns_scores_for_both_datasets():
         model=model,
         in_distribution_dataloader=in_distribution_dataloader,
         out_distribution_dataloader=out_distribution_dataloader,
+        calibration_dataloader=calibration_dataloader,
         config=config,
         device=torch.device("cpu"),
     )
@@ -106,20 +186,17 @@ def test_scorer_returns_scores_for_both_datasets():
     results = scorer.score()
 
     assert "likelihood" in results
+    assert "typicality" not in results
     assert results["likelihood"]["in_distribution"].shape == (5,)
     assert results["likelihood"]["out_distribution"].shape == (7,)
 
 
-def test_scorer_preserves_score_values_across_batches():
+def test_scorer_returns_likelihood_and_typicality_when_both_enabled():
     model = DummyVae()
 
-    x = torch.zeros(5, 1, 2, 2)
-
-    dataloader = DataLoader(
-        TensorDataset(x),
-        batch_size=2,
-        shuffle=False,
-    )
+    in_distribution_dataloader = make_dataloader(num_samples=5, batch_size=2)
+    out_distribution_dataloader = make_dataloader(num_samples=7, batch_size=3)
+    calibration_dataloader = make_dataloader(num_samples=6, batch_size=2)
 
     config = {
         "model": {
@@ -129,7 +206,56 @@ def test_scorer_preserves_score_values_across_batches():
             "signals": {
                 "likelihood": {
                     "enabled": True,
-                }
+                },
+                "typicality": {
+                    "enabled": True,
+                },
+            }
+        },
+    }
+
+    scorer = Scorer(
+        model=model,
+        in_distribution_dataloader=in_distribution_dataloader,
+        out_distribution_dataloader=out_distribution_dataloader,
+        calibration_dataloader=calibration_dataloader,
+        config=config,
+        device=torch.device("cpu"),
+    )
+
+    results = scorer.score()
+
+    assert "likelihood" in results
+    assert "typicality" in results
+
+    assert results["likelihood"]["in_distribution"].shape == (5,)
+    assert results["likelihood"]["out_distribution"].shape == (7,)
+
+    assert results["typicality"]["in_distribution"].shape == (5,)
+    assert results["typicality"]["out_distribution"].shape == (7,)
+
+    assert torch.allclose(results["typicality"]["in_distribution"], torch.zeros(5))
+    assert torch.allclose(results["typicality"]["out_distribution"], torch.zeros(7))
+
+
+def test_scorer_preserves_score_values_across_batches():
+    model = DummyVae()
+
+    dataloader = make_dataloader(num_samples=5, batch_size=2)
+    calibration_dataloader = make_dataloader(num_samples=6, batch_size=2)
+
+    config = {
+        "model": {
+            "name": "vae",
+        },
+        "scoring": {
+            "signals": {
+                "likelihood": {
+                    "enabled": True,
+                },
+                "typicality": {
+                    "enabled": False,
+                },
             }
         },
     }
@@ -138,6 +264,7 @@ def test_scorer_preserves_score_values_across_batches():
         model=model,
         in_distribution_dataloader=dataloader,
         out_distribution_dataloader=dataloader,
+        calibration_dataloader=calibration_dataloader,
         config=config,
         device=torch.device("cpu"),
     )
@@ -145,10 +272,5 @@ def test_scorer_preserves_score_values_across_batches():
     estimator = NLLEstimator(model=model, model_architecture="vae")
     scores = scorer.score_dataloader(estimator=estimator, dataloader=dataloader)
 
-    expected_scores = torch.full(
-        size=(5,),
-        fill_value=4 * torch.log(torch.tensor(2.0)),
-    )
-
     assert scores.shape == (5,)
-    assert torch.allclose(scores, expected_scores)
+    assert torch.allclose(scores.cpu(), expected_dummy_nll(batch_size=5))

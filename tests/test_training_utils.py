@@ -316,3 +316,58 @@ def test_create_scoring_dataloaders_return_batches_with_expected_shape(monkeypat
 
     assert in_batch.shape == (4, 1, 28, 28)
     assert out_batch.shape == (4, 1, 28, 28)
+
+
+def test_create_calibration_dataloader_uses_training_split(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+
+    config["scoring"] = {
+        "dataloader": {
+            "batch_size": 4,
+            "num_workers": 0,
+        }
+    }
+
+    dataloader = utils.create_calibration_dataloader(
+        config=config,
+        dataset_name="mnist",
+    )
+
+    assert dataloader.dataset.train is True
+    assert dataloader.batch_size == 4
+
+
+def test_create_calibration_dataloader_returns_expected_batch_shape(monkeypatch, config):
+    monkeypatch.setattr(utils.datasets, "MNIST", DummyImageDataset)
+
+    config["scoring"] = {
+        "dataloader": {
+            "batch_size": 4,
+            "num_workers": 0,
+        }
+    }
+
+    dataloader = utils.create_calibration_dataloader(
+        config=config,
+        dataset_name="mnist",
+    )
+
+    batch = next(iter(dataloader))
+    x = batch[0]
+
+    assert x.shape == (4, 1, 28, 28)
+
+
+def test_create_calibration_dataloader_rejects_unsupported_dataset(config):
+    config["scoring"] = {
+        "dataloader": {
+            "batch_size": 4,
+            "num_workers": 0,
+        }
+    }
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        utils.create_calibration_dataloader(
+            config=config,
+            dataset_name="not_a_dataset",
+        )
