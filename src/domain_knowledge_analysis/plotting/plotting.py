@@ -148,10 +148,10 @@ class Plotter:
         if compact_range <= 0:
             compact_range = 1.0
 
-        half_range = compact_range / 2.0
+        #half_range = compact_range / 2.0
 
-        x_min = compact_max - half_range
-        x_max = compact_max + half_range
+        x_min = compact_max - compact_range #half_range
+        x_max = compact_max + compact_range #half_range
 
         return x_min, x_max
 
