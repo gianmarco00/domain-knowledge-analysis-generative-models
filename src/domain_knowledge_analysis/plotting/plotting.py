@@ -94,6 +94,7 @@ class Plotter:
             in_distribution_scores.numpy(),
             bins=bin_edges.numpy(),
             alpha=alpha,
+            density=True,
             label=in_distribution_name.upper(),
         )
 
@@ -101,6 +102,7 @@ class Plotter:
             out_distribution_scores.numpy(),
             bins=bin_edges.numpy(),
             alpha=alpha,
+            density=True,
             label=out_distribution_name.upper(),
         )
 
