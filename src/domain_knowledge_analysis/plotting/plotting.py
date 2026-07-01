@@ -37,6 +37,7 @@ class Plotter:
                 title=title,
                 filename=full_filename,
                 zoom=False,
+                bins=80,
             )
 
             saved_paths[f"{signal_name}_zoom"] = self.plot_histogram(
@@ -47,6 +48,7 @@ class Plotter:
                 title=f"{title} — zoom",
                 filename=zoom_filename,
                 zoom=True,
+                bins=120,
             )
 
         return saved_paths
@@ -118,36 +120,40 @@ class Plotter:
         out_distribution_scores,
         zoom,
     ):
-        all_scores = torch.cat(
-            [in_distribution_scores, out_distribution_scores],
-            dim=0,
-        )
-
-        x_min = all_scores.min().item()
-        x_max = all_scores.max().item()
-
         if not zoom:
-            return x_min, x_max
+            all_scores = torch.cat(
+                [in_distribution_scores, out_distribution_scores],
+                dim=0,
+            )
 
-        in_distribution_95 = torch.quantile(
-            in_distribution_scores,
-            0.95,
-        ).item()
+            return all_scores.min().item(), all_scores.max().item()
 
-        out_distribution_95 = torch.quantile(
-            out_distribution_scores,
-            0.95,
-        ).item()
+        in_min = in_distribution_scores.min().item()
+        in_max = in_distribution_scores.max().item()
+        in_range = in_max - in_min
 
-        zoom_x_max = min(in_distribution_95, out_distribution_95)
+        out_min = out_distribution_scores.min().item()
+        out_max = out_distribution_scores.max().item()
+        out_range = out_max - out_min
 
-        if zoom_x_max <= x_min:
-            zoom_x_max = torch.quantile(all_scores, 0.25).item()
+        if in_range <= out_range:
+            compact_min = in_min
+            compact_max = in_max
+            compact_range = in_range
+        else:
+            compact_min = out_min
+            compact_max = out_max
+            compact_range = out_range
 
-        if zoom_x_max <= x_min:
-            zoom_x_max = x_max
+        if compact_range <= 0:
+            compact_range = 1.0
 
-        return x_min, zoom_x_max
+        half_range = compact_range / 2.0
+
+        x_min = compact_max - half_range
+        x_max = compact_max + half_range
+
+        return x_min, x_max
 
     def _to_cpu_1d_tensor(self, scores):
         if not isinstance(scores, torch.Tensor):
