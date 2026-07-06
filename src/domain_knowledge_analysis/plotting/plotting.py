@@ -3,6 +3,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 
+from domain_knowledge_analysis.scoring.metrics import compute_auroc
+
 
 class Plotter:
     def __init__(self, log_dir):
@@ -19,36 +21,39 @@ class Plotter:
         saved_paths = {}
 
         for signal_name in results:
-            full_filename = (
-                f"{signal_name}_"
-                f"{in_distribution_name}_vs_{out_distribution_name}_full.png"
+            auroc = compute_auroc(
+                results[signal_name]["in_distribution"],
+                results[signal_name]["out_distribution"],
             )
 
-            zoom_filename = (
+            histogram_filename = (
                 f"{signal_name}_"
-                f"{in_distribution_name}_vs_{out_distribution_name}_zoom.png"
+                f"{in_distribution_name}_vs_{out_distribution_name}_histogram.png"
             )
 
-            saved_paths[f"{signal_name}_full"] = self.plot_histogram(
+            ecdf_filename = (
+                f"{signal_name}_"
+                f"{in_distribution_name}_vs_{out_distribution_name}_ecdf.png"
+            )
+
+            saved_paths[f"{signal_name}_histogram"] = self.plot_histogram(
                 results=results,
                 signal_name=signal_name,
                 in_distribution_name=in_distribution_name,
                 out_distribution_name=out_distribution_name,
                 title=title,
-                filename=full_filename,
-                zoom=False,
-                bins=80,
+                filename=histogram_filename,
+                auroc=auroc,
             )
 
-            saved_paths[f"{signal_name}_zoom"] = self.plot_histogram(
+            saved_paths[f"{signal_name}_ecdf"] = self.plot_ecdf(
                 results=results,
                 signal_name=signal_name,
                 in_distribution_name=in_distribution_name,
                 out_distribution_name=out_distribution_name,
-                title=f"{title} — zoom",
-                filename=zoom_filename,
-                zoom=True,
-                bins=120,
+                title=title,
+                filename=ecdf_filename,
+                auroc=auroc,
             )
 
         return saved_paths
@@ -61,73 +66,69 @@ class Plotter:
         out_distribution_name,
         title,
         filename,
-        bins=50,
+        auroc,
+        bins=100,
         alpha=0.75,
-        zoom=False,
     ):
-        if signal_name not in results:
-            raise ValueError(f"Signal '{signal_name}' not found in results.")
-
-        signal_results = results[signal_name]
-
         in_distribution_scores = self._to_cpu_1d_tensor(
-            signal_results["in_distribution"]
+            results[signal_name]["in_distribution"]
         )
 
         out_distribution_scores = self._to_cpu_1d_tensor(
-            signal_results["out_distribution"]
+            results[signal_name]["out_distribution"]
+        )
+
+        all_scores = torch.cat([
+            in_distribution_scores,
+            out_distribution_scores,
+        ])
+
+        plot_min = torch.quantile(all_scores, 0.005).item()
+        plot_max = torch.quantile(all_scores, 0.995).item()
+
+        bin_edges = torch.linspace(
+            plot_min,
+            plot_max,
+            bins + 1,
+        ).numpy()
+
+        in_distribution_weights = (
+            torch.ones_like(in_distribution_scores)
+            / len(in_distribution_scores)
+        )
+
+        out_distribution_weights = (
+            torch.ones_like(out_distribution_scores)
+            / len(out_distribution_scores)
         )
 
         save_path = self.output_dir / filename
 
         plt.figure(figsize=(7, 6))
 
-        if zoom:
-            x_min, x_max = self._get_plot_range(
-                in_distribution_scores=in_distribution_scores,
-                out_distribution_scores=out_distribution_scores,
-                zoom=True,
-            )
+        plt.hist(
+            in_distribution_scores.numpy(),
+            bins=bin_edges,
+            weights=in_distribution_weights.numpy(),
+            alpha=alpha,
+            label=in_distribution_name.upper(),
+        )
 
-            bin_edges = torch.linspace(x_min, x_max, bins + 1).numpy()
+        plt.hist(
+            out_distribution_scores.numpy(),
+            bins=bin_edges,
+            weights=out_distribution_weights.numpy(),
+            alpha=alpha,
+            label=out_distribution_name.upper(),
+        )
 
-            plt.hist(
-                in_distribution_scores.numpy(),
-                bins=bin_edges,
-                alpha=alpha,
-                density=True,
-                label=in_distribution_name.upper(),
-            )
+        plt.title(
+            f"{title}\nAUROC = {auroc:.4f}",
+            fontsize=18,
+        )
 
-            plt.hist(
-                out_distribution_scores.numpy(),
-                bins=bin_edges,
-                alpha=alpha,
-                density=True,
-                label=out_distribution_name.upper(),
-            )
-
-            plt.ylabel("density")
-
-        else:
-            plt.hist(
-                in_distribution_scores.numpy(),
-                bins=bins,
-                alpha=alpha,
-                label=in_distribution_name.upper(),
-            )
-
-            plt.hist(
-                out_distribution_scores.numpy(),
-                bins=bins,
-                alpha=alpha,
-                label=out_distribution_name.upper(),
-            )
-
-            plt.ylabel("# of samples")
-
-        plt.title(title, fontsize=18)
         plt.xlabel(self._format_signal_name(signal_name))
+        plt.ylabel("Proportion of samples")
         plt.legend()
         plt.tight_layout()
         plt.savefig(save_path)
@@ -135,63 +136,88 @@ class Plotter:
 
         return save_path
 
-    def _get_plot_range(
+    def plot_ecdf(
         self,
-        in_distribution_scores,
-        out_distribution_scores,
-        zoom,
+        results,
+        signal_name,
+        in_distribution_name,
+        out_distribution_name,
+        title,
+        filename,
+        auroc,
     ):
-        if not zoom:
-            all_scores = torch.cat(
-                [in_distribution_scores, out_distribution_scores],
-                dim=0,
-            )
+        in_distribution_scores = self._to_cpu_1d_tensor(
+            results[signal_name]["in_distribution"]
+        )
 
-            return all_scores.min().item(), all_scores.max().item()
+        out_distribution_scores = self._to_cpu_1d_tensor(
+            results[signal_name]["out_distribution"]
+        )
 
-        in_min = in_distribution_scores.min().item()
-        in_max = in_distribution_scores.max().item()
-        in_range = in_max - in_min
+        in_distribution_scores = torch.sort(
+            in_distribution_scores
+        ).values
 
-        out_min = out_distribution_scores.min().item()
-        out_max = out_distribution_scores.max().item()
-        out_range = out_max - out_min
+        out_distribution_scores = torch.sort(
+            out_distribution_scores
+        ).values
 
-        if in_range <= out_range:
-            compact_min = in_min
-            compact_max = in_max
-            compact_range = in_range
-        else:
-            compact_min = out_min
-            compact_max = out_max
-            compact_range = out_range
+        in_distribution_ecdf = torch.arange(
+            1,
+            len(in_distribution_scores) + 1,
+            dtype=torch.float32,
+        ) / len(in_distribution_scores)
 
-        if compact_range <= 0:
-            compact_range = 1.0
+        out_distribution_ecdf = torch.arange(
+            1,
+            len(out_distribution_scores) + 1,
+            dtype=torch.float32,
+        ) / len(out_distribution_scores)
 
-        #half_range = compact_range / 2.0
+        save_path = self.output_dir / filename
 
-        x_min = compact_max - compact_range #half_range
-        x_max = compact_max + compact_range #half_range
+        plt.figure(figsize=(7, 6))
 
-        return x_min, x_max
+        plt.step(
+            in_distribution_scores.numpy(),
+            in_distribution_ecdf.numpy(),
+            where="post",
+            label=in_distribution_name.upper(),
+        )
+
+        plt.step(
+            out_distribution_scores.numpy(),
+            out_distribution_ecdf.numpy(),
+            where="post",
+            label=out_distribution_name.upper(),
+        )
+
+        plt.title(
+            f"{title}\nAUROC = {auroc:.4f}",
+            fontsize=18,
+        )
+
+        plt.xlabel(self._format_signal_name(signal_name))
+        plt.ylabel("Cumulative proportion")
+        plt.ylim(0, 1)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close()
+
+        return save_path
 
     def _to_cpu_1d_tensor(self, scores):
         if not isinstance(scores, torch.Tensor):
             scores = torch.tensor(scores)
 
-        scores = scores.detach().cpu().flatten()
-
-        if scores.dim() != 1:
-            raise ValueError(f"Expected 1D scores, got shape {scores.shape}.")
-
-        return scores
+        return scores.detach().cpu().flatten()
 
     def _format_signal_name(self, signal_name):
         signal_names = {
             "likelihood": "NLL via negative ELBO",
             "typicality": "Typicality score",
-            "gradnorm": "GradNorm score"
+            "gradnorm": "GradNorm score",
         }
 
         return signal_names.get(signal_name, signal_name)
