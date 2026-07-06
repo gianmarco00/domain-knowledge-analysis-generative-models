@@ -108,13 +108,11 @@ def create_dataset(config, dataset_name, train):
     return dataset
 
 
-def create_training_dataloaders(config):
-
-    dataset_name = config["dataset"]["name"].lower()
+def create_train_validation_datasets(config, dataset_name):
     dataset = create_dataset(
-        config, 
-        dataset_name, 
-        train=True
+        config=config,
+        dataset_name=dataset_name,
+        train=True,
     )
 
     train_split = config["dataset"]["train_split"]
@@ -127,6 +125,18 @@ def create_training_dataloaders(config):
         dataset,
         [train_size, validation_size],
         generator=generator,
+    )
+
+    return train_dataset, validation_dataset
+
+
+def create_training_dataloaders(config):
+
+    dataset_name = config["dataset"]["name"].lower()
+
+    train_dataset, validation_dataset = create_train_validation_datasets(
+        config=config,
+        dataset_name=dataset_name,
     )
 
     dataloader_config = config["dataloader"]
@@ -146,6 +156,7 @@ def create_training_dataloaders(config):
     )
 
     return train_dataloader, validation_dataloader
+
 
 def create_scoring_dataloaders(
     config,
@@ -183,17 +194,17 @@ def create_scoring_dataloaders(
 
     return in_distribution_dataloader, out_distribution_dataloader
 
+
 def create_calibration_dataloader(config, dataset_name):
-    dataset = create_dataset(
+    _, validation_dataset = create_train_validation_datasets(
         config=config,
         dataset_name=dataset_name,
-        train=True,
     )
 
     dataloader_config = config["scoring"]["dataloader"]
 
     dataloader = DataLoader(
-        dataset,
+        validation_dataset,
         batch_size=dataloader_config["batch_size"],
         shuffle=False,
         num_workers=dataloader_config["num_workers"],

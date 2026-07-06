@@ -49,6 +49,8 @@ scoring:
       enabled: true
     typicality:
       enabled: true
+    gradnorm:
+      enabled: true
 
 
 seed: 42

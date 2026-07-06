@@ -191,6 +191,7 @@ class Plotter:
         signal_names = {
             "likelihood": "NLL via negative ELBO",
             "typicality": "Typicality score",
+            "gradnorm": "GradNorm score"
         }
 
         return signal_names.get(signal_name, signal_name)

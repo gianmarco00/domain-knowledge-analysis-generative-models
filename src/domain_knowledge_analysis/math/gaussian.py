@@ -30,3 +30,15 @@ def kl_divergence(mean, log_variance):
 
     return kl
 
+def fit_diagonal_gaussian(samples):
+
+    mean = torch.mean(samples, dim=0)
+
+    variance = torch.var(
+        samples,
+        dim=0,
+        unbiased=False,
+    )
+    
+    return mean, variance
+

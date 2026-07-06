@@ -1,4 +1,6 @@
 import torch
+from tqdm import tqdm
+
 from .nll import NLLEstimator
 
 
@@ -18,7 +20,9 @@ class TypicalityEstimator():
         nll_total = torch.tensor(0.0, device=self.device)
         nll_count = 0
 
-        for batch in self.calibration_dataloader:
+        progress_bar = tqdm(self.calibration_dataloader, desc="Calibrating Typicality Estimator")
+
+        for batch in progress_bar:
             x = batch[0].to(self.device)
             nll_batch = self.nll_estimator.estimate(x)
 

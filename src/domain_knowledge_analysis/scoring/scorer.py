@@ -1,6 +1,6 @@
 import torch
 
-from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator
+from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator, GradNormEstimator
 
 
 class Scorer:
@@ -36,6 +36,13 @@ class Scorer:
 
         if signal_config["typicality"]["enabled"]:
             estimators["typicality"] = TypicalityEstimator(
+                model=self.model,
+                model_architecture=self.config["model"]["name"].lower(),
+                calibration_dataloader=self.calibration_dataloader
+            )
+
+        if signal_config["gradnorm"]["enabled"]:
+            estimators["gradnorm"] = GradNormEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
                 calibration_dataloader=self.calibration_dataloader
