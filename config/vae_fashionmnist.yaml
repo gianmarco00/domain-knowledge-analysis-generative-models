@@ -36,7 +36,7 @@ optimizer:
   name: adam
 
 scoring:
-  pretrained_model: null
+  pretrained_model: runs/vae_fashionmnist_lr_0.001_07-01_16-48-19/checkpoints/last.pt
   out_distribution_dataset: mnist
 
   dataloader:
