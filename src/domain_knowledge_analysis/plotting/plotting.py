@@ -78,17 +78,22 @@ class Plotter:
             results[signal_name]["out_distribution"]
         )
 
+        in_distribution_scores = torch.log1p(
+            in_distribution_scores
+        )
+
+        out_distribution_scores = torch.log1p(
+            out_distribution_scores
+        )
+
         all_scores = torch.cat([
             in_distribution_scores,
             out_distribution_scores,
         ])
 
-        plot_min = torch.quantile(all_scores, 0.005).item()
-        plot_max = torch.quantile(all_scores, 0.995).item()
-
         bin_edges = torch.linspace(
-            plot_min,
-            plot_max,
+            all_scores.min(),
+            all_scores.max(),
             bins + 1,
         ).numpy()
 
@@ -127,7 +132,10 @@ class Plotter:
             fontsize=18,
         )
 
-        plt.xlabel(self._format_signal_name(signal_name))
+        plt.xlabel(
+            f"log(1 + {self._format_signal_name(signal_name)})"
+        )
+
         plt.ylabel("Proportion of samples")
         plt.legend()
         plt.tight_layout()

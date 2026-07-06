@@ -11,9 +11,13 @@ class Experiment():
         self.config = utils.load_config(config_path)
         utils.set_seed(self.config["seed"])
 
-        self.log_dir = utils.create_log_dir(self.config)
-
-        self.logger = TensorBoardLogger(self.log_dir)
+        if self.config["scoring"]["pretrained_model"]:
+            self.pretrained_model_path = Path(utils.get_repo_root() / self.config["scoring"]["pretrained_model"])
+            self.log_dir = self.pretrained_model_path.parent.parent
+        else:
+            self.pretrained_model_path = None
+            self.log_dir = utils.create_log_dir(self.config)
+            self.logger = TensorBoardLogger(self.log_dir)
 
         self.checkpoint_manager = CheckpointManager(self.log_dir, self.config)
 
@@ -21,8 +25,6 @@ class Experiment():
         print(f"Using device: {self.device}")
 
         self.model = utils.create_model(self.config)
-
-        self.pretrained_model_path = utils.get_repo_root() / self.config["scoring"]["pretrained_model"] if self.config["scoring"]["pretrained_model"] else None
 
         
     def train(self):
@@ -87,8 +89,7 @@ class Experiment():
 
         results = scorer.score()
 
-        results_log_dir = self.get_results_log_dir(self.pretrained_model_path)
-        plotter = Plotter(results_log_dir)
+        plotter = Plotter(self.log_dir)
 
         plotter.plot(
             results=results,
@@ -100,14 +101,6 @@ class Experiment():
         return results
 
 
-    def get_results_log_dir(self, pretrained_model_path):
-
-        if pretrained_model_path:
-            checkpoint_path = Path(pretrained_model_path)
-            return checkpoint_path.parent.parent
-
-        return self.log_dir
-    
     @staticmethod
     def print_tensorboard_instructions(log_dir):
         runs_dir = log_dir.parent
