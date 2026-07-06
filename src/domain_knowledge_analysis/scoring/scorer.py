@@ -1,4 +1,5 @@
 import torch
+from tqdm import tqdm
 
 from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator, GradNormEstimator
 
@@ -82,7 +83,9 @@ class Scorer:
     def score_dataloader(self, estimator, dataloader):
         all_scores = []
 
-        for batch in dataloader:
+        progress_bar = tqdm(dataloader, desc=f"Scoring with {estimator.__class__.__name__}")
+
+        for batch in progress_bar:
             x = batch[0].to(self.device)
 
             scores = estimator.estimate(x)
