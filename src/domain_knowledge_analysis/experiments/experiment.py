@@ -96,7 +96,7 @@ class Experiment():
         plotter.plot(
             results=results,
             in_distribution_name=training_dataset_name,
-            out_distribution_name=out_distribution_dataset_names,
+            out_distribution_names=out_distribution_dataset_names,
             title=f"Trained on {training_dataset_name.upper()}",
         )
 
