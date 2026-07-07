@@ -3,7 +3,7 @@ from pathlib import Path
 from domain_knowledge_analysis.experiments import Experiment
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "vae_fashionmnist.yaml"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "vae_mnist.yaml"
 
 
 def main():

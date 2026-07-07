@@ -38,7 +38,7 @@ optimizer:
 
 scoring:
   pretrained_model: runs/vae_mnist_lr_0.001_07-06_17-06-31/checkpoints/last.pt
-  out_distribution_datasets: [fashion_mnist, pneumonia_mnist]
+  out_distribution_datasets: [fashion_mnist, organamnist, kmnist]
 
   dataloader:
     batch_size: 128
