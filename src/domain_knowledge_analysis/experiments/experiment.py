@@ -1,6 +1,8 @@
-from domain_knowledge_analysis.training import utils, Trainer, TensorBoardLogger, CheckpointManager
+from domain_knowledge_analysis.training import Trainer, TensorBoardLogger, CheckpointManager
 from domain_knowledge_analysis.scoring import Scorer
 from domain_knowledge_analysis.plotting import Plotter
+
+from domain_knowledge_analysis import utils
 
 from pathlib import Path
 

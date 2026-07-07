@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 
-from domain_knowledge_analysis.evaluation import compute_auroc
+from domain_knowledge_analysis.scoring import compute_auroc
 
 
 class Plotter:
