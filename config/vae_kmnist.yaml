@@ -1,0 +1,56 @@
+experiment:
+  name: vae_kmnist
+
+paths:
+  dataset_dir: datasets
+  runs_dir: runs
+
+dataset:
+  name: kmnist
+  train: true
+  train_split: 0.8
+  shape: [1, 28, 28]
+
+dataloader:
+  batch_size: 128
+  shuffle_train: true
+  shuffle_validation: false
+  num_workers: 0
+
+training:
+  epochs: 100
+  learning_rate: 0.001
+  start_weights: random
+
+model:
+  name: vae
+
+  encoder:
+    latent_dim: 32
+    out_channels: [32, 64, 128, 128]
+    kernels: [3, 3, 3, 3]
+    strides: [2, 2, 2, 1]
+    paddings: [1, 1, 1, 1]
+
+optimizer:
+  name: adam
+
+
+scoring:
+  pretrained_model: null
+  out_distribution_datasets: [mnist, fashion_mnist, organamnist]
+
+  dataloader:
+    batch_size: 128
+    num_workers: 0
+
+  signals:
+    likelihood:
+      enabled: true
+    typicality:
+      enabled: true
+    gradnorm:
+      enabled: true
+
+
+seed: 42
