@@ -4,8 +4,11 @@ import random
 
 import yaml
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, ConcatDataset
 from torchvision import datasets, transforms
+
+import medmnist
+from medmnist import INFO
 
 from domain_knowledge_analysis.models import Vae
 from domain_knowledge_analysis.losses import vae_loss
@@ -45,7 +48,7 @@ def get_device():
 
 def create_transform(dataset_name):
 
-    if dataset_name in ["mnist", "fashionmnist", "fashion_mnist", "fmnist"]:
+    if dataset_name in ["mnist", "fashionmnist", "fashion_mnist", "fmnist", "pneumoniamnist"]:
         return transforms.ToTensor()
     
     raise ValueError(f"Unsupported transform for dataset: {dataset_name}")
@@ -76,26 +79,75 @@ def create_dataset(config, dataset_name, train):
         dataset_class = datasets.MNIST
         processed_folder = "MNIST"
 
-    elif dataset_name in ["fashion_mnist", "fmnist"]:
+        processed_dir = dataset_dir / processed_folder / "processed"
+
+        download_needed = not (
+            (processed_dir / "training.pt").exists()
+            and (processed_dir / "test.pt").exists()
+        )
+
+        dataset = dataset_class(
+            root=dataset_dir,
+            train=train,
+            download=download_needed,
+            transform=transform,
+        )
+
+    elif dataset_name in ["fashionmnist", "fashion_mnist", "fmnist"]:
         dataset_class = datasets.FashionMNIST
         processed_folder = "FashionMNIST"
 
+        processed_dir = dataset_dir / processed_folder / "processed"
+
+        download_needed = not (
+            (processed_dir / "training.pt").exists()
+            and (processed_dir / "test.pt").exists()
+        )
+
+        dataset = dataset_class(
+            root=dataset_dir,
+            train=train,
+            download=download_needed,
+            transform=transform,
+        )
+
+    elif dataset_name in ["pneumoniamnist", "pneumonia_mnist", "pneumonia-mnist"]:
+        actual_name = "pneumoniamnist"
+        dataset_class = getattr(
+            medmnist,
+            INFO[actual_name]["python_class"],
+        )
+
+        if train:
+            train_dataset = dataset_class(
+                split="train",
+                root=dataset_dir,
+                download=True,
+                transform=transform,
+            )
+
+            validation_dataset = dataset_class(
+                split="val",
+                root=dataset_dir,
+                download=True,
+                transform=transform,
+            )
+
+            dataset = ConcatDataset([
+                train_dataset,
+                validation_dataset,
+            ])
+
+        else:
+            dataset = dataset_class(
+                split="test",
+                root=dataset_dir,
+                download=True,
+                transform=transform,
+            )
+
     else:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
-
-    processed_dir = dataset_dir / processed_folder / "processed"
-
-    download_needed = not (
-        (processed_dir / "training.pt").exists()
-        and (processed_dir / "test.pt").exists()
-    )
-
-    dataset = dataset_class(
-        root=dataset_dir,
-        train=train,
-        download=download_needed,
-        transform=transform,
-    )
 
     actual_shape = tuple(dataset[0][0].shape)
 
@@ -161,7 +213,7 @@ def create_training_dataloaders(config):
 def create_scoring_dataloaders(
     config,
     in_distribution_dataset_name,
-    out_distribution_dataset_name,
+    out_distribution_dataset_names,
 ):
 
     in_distribution_dataset = create_dataset(
@@ -170,11 +222,15 @@ def create_scoring_dataloaders(
         train=False,
     )
 
-    out_distribution_dataset = create_dataset(
-        config=config,
-        dataset_name=out_distribution_dataset_name,
-        train=False,
-    )
+    out_distribution_datasets = {}
+
+    for dataset_name in out_distribution_dataset_names:
+        out_distribution_dataset = create_dataset(
+            config=config,
+            dataset_name=dataset_name,
+            train=False,
+        )
+        out_distribution_datasets.update({dataset_name : out_distribution_dataset})
 
     dataloader_config = config["scoring"]["dataloader"]
 
@@ -185,14 +241,19 @@ def create_scoring_dataloaders(
         num_workers=dataloader_config["num_workers"],
     )
 
-    out_distribution_dataloader = DataLoader(
-        out_distribution_dataset,
-        batch_size=dataloader_config["batch_size"],
-        shuffle=False,
-        num_workers=dataloader_config["num_workers"],
-    )
+    out_distribution_dataloaders = {}
 
-    return in_distribution_dataloader, out_distribution_dataloader
+    for dataset_name, out_distribution_dataset in out_distribution_datasets.items():
+
+        out_distribution_dataloader = DataLoader(
+            out_distribution_dataset,
+            batch_size=dataloader_config["batch_size"],
+            shuffle=False,
+            num_workers=dataloader_config["num_workers"],
+        )
+        out_distribution_dataloaders.update({dataset_name: out_distribution_dataloader})
+
+    return in_distribution_dataloader, out_distribution_dataloaders
 
 
 def create_calibration_dataloader(config, dataset_name):

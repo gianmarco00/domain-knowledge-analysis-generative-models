@@ -9,14 +9,14 @@ class Scorer:
         self,
         model,
         in_distribution_dataloader,
-        out_distribution_dataloader,
+        out_distribution_dataloaders,
         calibration_dataloader,
         config,
         device,
     ):
         self.model = model
         self.in_distribution_dataloader = in_distribution_dataloader
-        self.out_distribution_dataloader = out_distribution_dataloader
+        self.out_distribution_dataloaders = out_distribution_dataloaders
         self.calibration_dataloader = calibration_dataloader
         self.config = config
         self.device = device
@@ -68,15 +68,20 @@ class Scorer:
                 dataloader=self.in_distribution_dataloader,
             )
 
-            out_distribution_scores = self.score_dataloader(
-                estimator=estimator,
-                dataloader=self.out_distribution_dataloader,
-            )
-
             results[signal_name] = {
                 "in_distribution": in_distribution_scores,
-                "out_distribution": out_distribution_scores,
             }
+
+            for out_distribution_name, out_distribution_dataloader in self.out_distribution_dataloaders.items():
+
+                out_distribution_scores = self.score_dataloader(
+                    estimator=estimator,
+                    dataloader=out_distribution_dataloader,
+                )
+
+                results[signal_name].update({
+                    out_distribution_name: out_distribution_scores,
+                })
 
         return results
 

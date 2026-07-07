@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 
-from domain_knowledge_analysis.scoring.metrics import compute_auroc
+from domain_knowledge_analysis.evaluation import compute_auroc
 
 
 class Plotter:
@@ -15,67 +15,83 @@ class Plotter:
         self,
         results,
         in_distribution_name,
-        out_distribution_name,
+        out_distribution_names,
         title,
     ):
         saved_paths = {}
 
         for signal_name in results:
-            auroc = compute_auroc(
-                results[signal_name]["in_distribution"],
-                results[signal_name]["out_distribution"],
-            )
+            in_distribution_scores = results[signal_name]["in_distribution"]
 
-            histogram_filename = (
-                f"{signal_name}_"
-                f"{in_distribution_name}_vs_{out_distribution_name}_histogram.png"
-            )
+            for out_distribution_name in out_distribution_names:
+                out_distribution_scores = results[signal_name][
+                    out_distribution_name
+                ]
 
-            ecdf_filename = (
-                f"{signal_name}_"
-                f"{in_distribution_name}_vs_{out_distribution_name}_ecdf.png"
-            )
+                auroc = compute_auroc(
+                    in_distribution_scores,
+                    out_distribution_scores,
+                )
 
-            saved_paths[f"{signal_name}_histogram"] = self.plot_histogram(
-                results=results,
-                signal_name=signal_name,
-                in_distribution_name=in_distribution_name,
-                out_distribution_name=out_distribution_name,
-                title=title,
-                filename=histogram_filename,
-                auroc=auroc,
-            )
+                histogram_filename = (
+                    f"{signal_name}_"
+                    f"{in_distribution_name}_vs_"
+                    f"{out_distribution_name}_histogram.png"
+                )
 
-            saved_paths[f"{signal_name}_ecdf"] = self.plot_ecdf(
-                results=results,
-                signal_name=signal_name,
-                in_distribution_name=in_distribution_name,
-                out_distribution_name=out_distribution_name,
-                title=title,
-                filename=ecdf_filename,
-                auroc=auroc,
-            )
+                ecdf_filename = (
+                    f"{signal_name}_"
+                    f"{in_distribution_name}_vs_"
+                    f"{out_distribution_name}_ecdf.png"
+                )
+
+                saved_paths[
+                    f"{signal_name}_{out_distribution_name}_histogram"
+                ] = self.plot_histogram(
+                    in_distribution_scores=in_distribution_scores,
+                    out_distribution_scores=out_distribution_scores,
+                    signal_name=signal_name,
+                    in_distribution_name=in_distribution_name,
+                    out_distribution_name=out_distribution_name,
+                    title=title,
+                    filename=histogram_filename,
+                    auroc=auroc,
+                )
+
+                saved_paths[
+                    f"{signal_name}_{out_distribution_name}_ecdf"
+                ] = self.plot_ecdf(
+                    in_distribution_scores=in_distribution_scores,
+                    out_distribution_scores=out_distribution_scores,
+                    signal_name=signal_name,
+                    in_distribution_name=in_distribution_name,
+                    out_distribution_name=out_distribution_name,
+                    title=title,
+                    filename=ecdf_filename,
+                    auroc=auroc,
+                )
 
         return saved_paths
 
     def plot_histogram(
         self,
-        results,
+        in_distribution_scores,
+        out_distribution_scores,
         signal_name,
         in_distribution_name,
         out_distribution_name,
         title,
         filename,
         auroc,
-        bins=100,
+        bins=80,
         alpha=0.75,
     ):
         in_distribution_scores = self._to_cpu_1d_tensor(
-            results[signal_name]["in_distribution"]
+            in_distribution_scores
         )
 
         out_distribution_scores = self._to_cpu_1d_tensor(
-            results[signal_name]["out_distribution"]
+            out_distribution_scores
         )
 
         in_distribution_scores = torch.log1p(
@@ -146,7 +162,8 @@ class Plotter:
 
     def plot_ecdf(
         self,
-        results,
+        in_distribution_scores,
+        out_distribution_scores,
         signal_name,
         in_distribution_name,
         out_distribution_name,
@@ -155,11 +172,11 @@ class Plotter:
         auroc,
     ):
         in_distribution_scores = self._to_cpu_1d_tensor(
-            results[signal_name]["in_distribution"]
+            in_distribution_scores
         )
 
         out_distribution_scores = self._to_cpu_1d_tensor(
-            results[signal_name]["out_distribution"]
+            out_distribution_scores
         )
 
         in_distribution_scores = torch.sort(
@@ -205,7 +222,10 @@ class Plotter:
             fontsize=18,
         )
 
-        plt.xlabel(self._format_signal_name(signal_name))
+        plt.xlabel(
+            self._format_signal_name(signal_name)
+        )
+
         plt.ylabel("Cumulative proportion")
         plt.ylim(0, 1)
         plt.legend()
@@ -228,4 +248,7 @@ class Plotter:
             "gradnorm": "GradNorm score",
         }
 
-        return signal_names.get(signal_name, signal_name)
+        return signal_names.get(
+            signal_name,
+            signal_name,
+        )

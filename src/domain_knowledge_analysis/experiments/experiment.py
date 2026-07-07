@@ -65,12 +65,12 @@ class Experiment():
             self.model = self.train()
             training_dataset_name = self.config["dataset"]["name"]
 
-        out_distribution_dataset_name = self.config["scoring"]["out_distribution_dataset"]
+        out_distribution_dataset_names = self.config["scoring"]["out_distribution_datasets"]
 
-        in_distribution_dataloader, out_distribution_dataloader = utils.create_scoring_dataloaders(
+        in_distribution_dataloader, out_distribution_dataloaders = utils.create_scoring_dataloaders(
             config=self.config,
             in_distribution_dataset_name=training_dataset_name,
-            out_distribution_dataset_name=out_distribution_dataset_name,
+            out_distribution_dataset_names=out_distribution_dataset_names,
         )
 
         calibration_dataloader = utils.create_calibration_dataloader(
@@ -81,7 +81,7 @@ class Experiment():
         scorer = Scorer(
             model=self.model,
             in_distribution_dataloader=in_distribution_dataloader,
-            out_distribution_dataloader=out_distribution_dataloader,
+            out_distribution_dataloaders=out_distribution_dataloaders,
             calibration_dataloader=calibration_dataloader,
             config=self.config,
             device=self.device,
@@ -94,7 +94,7 @@ class Experiment():
         plotter.plot(
             results=results,
             in_distribution_name=training_dataset_name,
-            out_distribution_name=out_distribution_dataset_name,
+            out_distribution_name=out_distribution_dataset_names,
             title=f"Trained on {training_dataset_name.upper()}",
         )
 
