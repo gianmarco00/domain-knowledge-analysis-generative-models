@@ -3,8 +3,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 
-from domain_knowledge_analysis.evaluation import compute_auroc
+from domain_knowledge_analysis.scoring import compute_auroc
 
+from .pca import compute_pca
 from .tsne import compute_tsne
 
 
@@ -16,9 +17,23 @@ class Plotter:
         max_tsne_samples_per_dataset=2000,
     ):
         self.output_dir = Path(log_dir) / "results"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        self.latent_visualization_dir = (
+            self.output_dir
+            / "latent_visualization"
+        )
+
+        self.latent_visualization_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         self.seed = seed
+
         self.max_tsne_samples_per_dataset = (
             max_tsne_samples_per_dataset
         )
@@ -34,15 +49,27 @@ class Plotter:
 
         for signal_name in results:
 
-            if signal_name == "latent_embeddings":
-                saved_paths["latent_embeddings_tsne"] = (
-                    self.plot_tsne(
-                        embeddings=results[signal_name],
-                        in_distribution_name=in_distribution_name,
-                        out_distribution_names=out_distribution_names,
-                        title=title,
-                        filename="latent_embeddings_tsne.png",
-                    )
+            if signal_name == "latent_encoding":
+                latent_embeddings = results[signal_name]
+
+                saved_paths[
+                    "latent_embeddings_tsne"
+                ] = self.plot_tsne(
+                    embeddings=latent_embeddings,
+                    in_distribution_name=in_distribution_name,
+                    out_distribution_names=out_distribution_names,
+                    title=title,
+                    filename="latent_embeddings_tsne.png",
+                )
+
+                saved_paths[
+                    "latent_embeddings_pca"
+                ] = self.plot_pca(
+                    embeddings=latent_embeddings,
+                    in_distribution_name=in_distribution_name,
+                    out_distribution_names=out_distribution_names,
+                    title=title,
+                    filename="latent_embeddings_pca.png",
                 )
 
                 continue
@@ -276,21 +303,16 @@ class Plotter:
         alpha=0.6,
         point_size=8,
     ):
-        dataset_embeddings = {
-            in_distribution_name: self._to_cpu_2d_tensor(
-                embeddings["in_distribution"]
-            )
-        }
+        dataset_embeddings = self._collect_dataset_embeddings(
+            embeddings=embeddings,
+            in_distribution_name=in_distribution_name,
+            out_distribution_names=out_distribution_names,
+        )
 
-        for dataset_name in out_distribution_names:
-            dataset_embeddings[dataset_name] = (
-                self._to_cpu_2d_tensor(
-                    embeddings[dataset_name]
-                )
+        dataset_embeddings = (
+            self._sample_equal_size_embeddings(
+                dataset_embeddings
             )
-
-        dataset_embeddings = self._sample_equal_size_embeddings(
-            dataset_embeddings
         )
 
         all_embeddings = torch.cat(
@@ -303,13 +325,20 @@ class Plotter:
             seed=self.seed,
         )
 
-        save_path = self.output_dir / filename
+        save_path = (
+            self.latent_visualization_dir
+            / filename
+        )
 
         plt.figure(figsize=(8, 7))
 
         start_index = 0
 
-        for dataset_name, embeddings_tensor in dataset_embeddings.items():
+        for (
+            dataset_name,
+            embeddings_tensor,
+        ) in dataset_embeddings.items():
+
             end_index = (
                 start_index
                 + len(embeddings_tensor)
@@ -343,13 +372,127 @@ class Plotter:
 
         return save_path
 
+    def plot_pca(
+        self,
+        embeddings,
+        in_distribution_name,
+        out_distribution_names,
+        title,
+        filename,
+        alpha=0.6,
+        point_size=8,
+    ):
+        dataset_embeddings = self._collect_dataset_embeddings(
+            embeddings=embeddings,
+            in_distribution_name=in_distribution_name,
+            out_distribution_names=out_distribution_names,
+        )
+
+        all_embeddings = torch.cat(
+            list(dataset_embeddings.values()),
+            dim=0,
+        )
+
+        (
+            pca_embeddings,
+            explained_variance_ratio,
+        ) = compute_pca(
+            embeddings=all_embeddings.numpy()
+        )
+
+        save_path = (
+            self.latent_visualization_dir
+            / filename
+        )
+
+        plt.figure(figsize=(8, 7))
+
+        start_index = 0
+
+        for (
+            dataset_name,
+            embeddings_tensor,
+        ) in dataset_embeddings.items():
+
+            end_index = (
+                start_index
+                + len(embeddings_tensor)
+            )
+
+            dataset_pca = pca_embeddings[
+                start_index:end_index
+            ]
+
+            plt.scatter(
+                dataset_pca[:, 0],
+                dataset_pca[:, 1],
+                s=point_size,
+                alpha=alpha,
+                label=dataset_name.upper(),
+            )
+
+            start_index = end_index
+
+        pc1_variance = (
+            float(explained_variance_ratio[0])
+            * 100
+        )
+
+        pc2_variance = (
+            float(explained_variance_ratio[1])
+            * 100
+        )
+
+        plt.title(
+            f"{title}\nLatent embeddings PCA",
+            fontsize=18,
+        )
+
+        plt.xlabel(
+            f"PC1 ({pc1_variance:.1f}% variance)"
+        )
+
+        plt.ylabel(
+            f"PC2 ({pc2_variance:.1f}% variance)"
+        )
+
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close()
+
+        return save_path
+
+    def _collect_dataset_embeddings(
+        self,
+        embeddings,
+        in_distribution_name,
+        out_distribution_names,
+    ):
+        dataset_embeddings = {
+            in_distribution_name:
+                self._to_cpu_2d_tensor(
+                    embeddings["in_distribution"]
+                )
+        }
+
+        for dataset_name in out_distribution_names:
+            dataset_embeddings[dataset_name] = (
+                self._to_cpu_2d_tensor(
+                    embeddings[dataset_name]
+                )
+            )
+
+        return dataset_embeddings
+
     def _sample_equal_size_embeddings(
         self,
         dataset_embeddings,
     ):
         smallest_dataset_size = min(
             len(embeddings)
-            for embeddings in dataset_embeddings.values()
+            for embeddings
+            in dataset_embeddings.values()
         )
 
         sample_size = min(
@@ -363,7 +506,11 @@ class Plotter:
 
         sampled_embeddings = {}
 
-        for dataset_name, embeddings in dataset_embeddings.items():
+        for (
+            dataset_name,
+            embeddings,
+        ) in dataset_embeddings.items():
+
             indices = torch.randperm(
                 len(embeddings),
                 generator=generator,

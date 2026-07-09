@@ -46,11 +46,12 @@ scoring:
 
   signals:
     likelihood:
-      enabled: true
+      enabled: false
     typicality:
-      enabled: true
+      enabled: false
     gradnorm:
+      enabled: false
+    latent_encoding:
       enabled: true
-
 
 seed: 42

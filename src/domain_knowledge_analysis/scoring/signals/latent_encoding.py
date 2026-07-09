@@ -21,6 +21,6 @@ class LatentEncodingEstimator:
 
     def estimate_vae_latent_encoding(self, x):
         with torch.no_grad():
-            mu, logvar = self.model.encode(x)
-            z = self.model.reparameterize(mu, logvar)
+            mean, log_variance = self.model.encoder(x)
+            z = self.model.reparametrize(mean, log_variance)
             return z

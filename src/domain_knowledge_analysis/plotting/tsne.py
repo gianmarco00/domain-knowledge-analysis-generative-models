@@ -1,10 +1,14 @@
-from sklearn.manifold import TSNE
-
 
 def compute_tsne(embeddings, seed):
-    return TSNE(
-        n_components=2,
+    import cupy as cp
+    from cuml.manifold import TSNE
+
+    tsne_embeddings = TSNE(
+        n_components=2,  
         random_state=seed,
-        init="pca",
-        learning_rate="auto",
     ).fit_transform(embeddings)
+
+    if isinstance(tsne_embeddings, cp.ndarray):
+        tsne_embeddings = cp.asnumpy(tsne_embeddings)
+
+    return tsne_embeddings
