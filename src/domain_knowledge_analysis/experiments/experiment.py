@@ -91,7 +91,7 @@ class Experiment():
 
         results = scorer.score()
 
-        plotter = Plotter(self.log_dir)
+        plotter = Plotter(self.log_dir, self.config["seed"])
 
         plotter.plot(
             results=results,

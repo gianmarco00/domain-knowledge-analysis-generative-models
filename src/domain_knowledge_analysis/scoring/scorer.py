@@ -1,7 +1,7 @@
 import torch
 from tqdm import tqdm
 
-from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator, GradNormEstimator
+from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator, GradNormEstimator, LatentEncodingEstimator
 
 
 class Scorer:
@@ -49,6 +49,12 @@ class Scorer:
                 calibration_dataloader=self.calibration_dataloader
             )
 
+        if signal_config["latent_encoding"]["enabled"]:
+            estimators["latent_encoding"] = LatentEncodingEstimator(
+                model=self.model,
+                model_architecture=self.config["model"]["name"].lower(),
+            )
+
         return estimators
     
     def calibrate_estimators(self):
@@ -88,7 +94,7 @@ class Scorer:
     def score_dataloader(self, estimator, dataloader):
         all_scores = []
 
-        progress_bar = tqdm(dataloader, desc=f"Scoring with {estimator.__class__.__name__}")
+        progress_bar = tqdm(dataloader, desc=f"Scoring {estimator.__class__.__name__}")
 
         for batch in progress_bar:
             x = batch[0].to(self.device)
