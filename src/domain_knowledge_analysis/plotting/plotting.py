@@ -74,6 +74,17 @@ class Plotter:
 
                 continue
 
+            if signal_name == "hole_score":
+                saved_paths["hole_score_grid"] = (
+                    self.plot_hole_score_grid(
+                        hole_score_results=results[signal_name],
+                        title=title,
+                        filename="hole_score_grid.png",
+                    )
+                )
+
+                continue
+
             in_distribution_scores = (
                 results[signal_name]["in_distribution"]
             )
@@ -290,6 +301,101 @@ class Plotter:
         plt.tight_layout()
         plt.savefig(save_path)
         plt.close()
+
+        return save_path
+
+    def plot_hole_score_grid(
+        self,
+        hole_score_results,
+        title,
+        filename,
+    ):
+        images_by_group = hole_score_results["images"]
+        scores_by_group = hole_score_results.get(
+            "image_scores",
+            {},
+        )
+        holemass = float(
+            torch.as_tensor(hole_score_results["holemass"])
+        )
+
+        group_labels = [
+            ("lowest", "Lowest H"),
+            ("middle", "Middle H"),
+            ("highest", "Highest H"),
+        ]
+
+        n_rows = len(group_labels)
+        n_columns = max(
+            len(images_by_group[group_name])
+            for group_name, _ in group_labels
+        )
+
+        save_path = self.output_dir / filename
+
+        figure, axes = plt.subplots(
+            n_rows,
+            n_columns,
+            figsize=(2 * n_columns, 2.3 * n_rows),
+            squeeze=False,
+        )
+
+        for row_index, (group_name, group_label) in enumerate(
+            group_labels
+        ):
+            images = self._to_cpu_image_tensor(
+                images_by_group[group_name]
+            )
+            scores = scores_by_group.get(group_name)
+
+            if scores is not None:
+                scores = self._to_cpu_1d_tensor(scores)
+
+            for column_index in range(n_columns):
+                axis = axes[row_index][column_index]
+                axis.set_xticks([])
+                axis.set_yticks([])
+
+                if column_index >= len(images):
+                    axis.axis("off")
+                    continue
+
+                image = self._prepare_image_for_plot(
+                    images[column_index]
+                )
+
+                if image.ndim == 2:
+                    axis.imshow(
+                        image,
+                        cmap="gray",
+                        vmin=0,
+                        vmax=1,
+                    )
+                else:
+                    axis.imshow(image)
+
+                if scores is not None:
+                    axis.set_title(
+                        f"H={float(scores[column_index]):.2f}",
+                        fontsize=8,
+                    )
+
+            axes[row_index][0].set_ylabel(
+                group_label,
+                rotation=0,
+                labelpad=42,
+                va="center",
+                fontsize=12,
+            )
+
+        figure.suptitle(
+            f"{title}\nHoleMass = {holemass:.4f}",
+            fontsize=18,
+        )
+
+        figure.tight_layout(rect=[0, 0, 1, 0.92])
+        figure.savefig(save_path)
+        plt.close(figure)
 
         return save_path
 
@@ -534,11 +640,33 @@ class Plotter:
 
         return embeddings.detach().cpu()
 
+    def _to_cpu_image_tensor(self, images):
+        if not isinstance(images, torch.Tensor):
+            images = torch.tensor(images)
+
+        return images.detach().cpu()
+
+    def _prepare_image_for_plot(self, image):
+        image = torch.clamp(
+            image.detach().cpu(),
+            min=0,
+            max=1,
+        )
+
+        if image.ndim == 3 and image.shape[0] in (1, 3):
+            image = image.permute(1, 2, 0)
+
+        if image.ndim == 3 and image.shape[-1] == 1:
+            image = image.squeeze(-1)
+
+        return image.numpy()
+
     def _format_signal_name(self, signal_name):
         signal_names = {
             "likelihood": "NLL via negative ELBO",
             "typicality": "Typicality score",
             "gradnorm": "GradNorm score",
+            "hole_score": "Hole score",
         }
 
         return signal_names.get(

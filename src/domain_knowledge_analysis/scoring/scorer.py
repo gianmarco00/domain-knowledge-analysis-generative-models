@@ -2,6 +2,7 @@ import torch
 from tqdm import tqdm
 
 from domain_knowledge_analysis.scoring.signals import NLLEstimator, TypicalityEstimator, GradNormEstimator, LatentEncodingEstimator
+from domain_knowledge_analysis.scoring.signals.hole_score import HoleScoreEstimator
 
 
 class Scorer:
@@ -29,30 +30,55 @@ class Scorer:
         estimators = {}
         signal_config = self.config["scoring"]["signals"]
 
-        if signal_config["likelihood"]["enabled"]:
+        if signal_config.get("likelihood", {}).get("enabled", False):
             estimators["likelihood"] = NLLEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
             )
 
-        if signal_config["typicality"]["enabled"]:
+        if signal_config.get("typicality", {}).get("enabled", False):
             estimators["typicality"] = TypicalityEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
                 calibration_dataloader=self.calibration_dataloader
             )
 
-        if signal_config["gradnorm"]["enabled"]:
+        if signal_config.get("gradnorm", {}).get("enabled", False):
             estimators["gradnorm"] = GradNormEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
                 calibration_dataloader=self.calibration_dataloader
             )
 
-        if signal_config["latent_encoding"]["enabled"]:
+        if signal_config.get("latent_encoding", {}).get("enabled", False):
             estimators["latent_encoding"] = LatentEncodingEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
+            )
+
+        hole_score_config = signal_config.get("hole_score", {})
+
+        if hole_score_config.get("enabled", False):
+            estimators["hole_score"] = HoleScoreEstimator(
+                model=self.model,
+                model_architecture=self.config["model"]["name"].lower(),
+                calibration_dataloader=self.calibration_dataloader,
+                num_prior_samples=hole_score_config.get(
+                    "num_prior_samples",
+                    4096,
+                ),
+                num_images_per_group=hole_score_config.get(
+                    "num_images_per_group",
+                    8,
+                ),
+                density_batch_size=hole_score_config.get(
+                    "density_batch_size",
+                    256,
+                ),
+                density_component_batch_size=hole_score_config.get(
+                    "density_component_batch_size",
+                    1024,
+                ),
             )
 
         return estimators
@@ -88,6 +114,11 @@ class Scorer:
                 results[signal_name].update({
                     out_distribution_name: out_distribution_scores,
                 })
+
+            if signal_name == "hole_score":
+                results[signal_name].update(
+                    estimator.get_prior_hole_summary()
+                )
 
         return results
 
