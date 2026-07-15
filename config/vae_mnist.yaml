@@ -52,6 +52,8 @@ scoring:
     gradnorm:
       enabled: false
     latent_encoding:
+      enabled: false
+    hole_mass:
       enabled: true
 
 

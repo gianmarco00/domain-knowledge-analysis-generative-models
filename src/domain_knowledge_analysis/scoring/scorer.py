@@ -56,29 +56,12 @@ class Scorer:
                 model_architecture=self.config["model"]["name"].lower(),
             )
 
-        hole_score_config = signal_config.get("hole_score", {})
 
-        if hole_score_config.get("enabled", False):
+        if signal_config.get("hole_mass", {}).get("enabled", False):
             estimators["hole_score"] = HoleScoreEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
                 calibration_dataloader=self.calibration_dataloader,
-                num_prior_samples=hole_score_config.get(
-                    "num_prior_samples",
-                    4096,
-                ),
-                num_images_per_group=hole_score_config.get(
-                    "num_images_per_group",
-                    8,
-                ),
-                density_batch_size=hole_score_config.get(
-                    "density_batch_size",
-                    256,
-                ),
-                density_component_batch_size=hole_score_config.get(
-                    "density_component_batch_size",
-                    1024,
-                ),
             )
 
         return estimators
