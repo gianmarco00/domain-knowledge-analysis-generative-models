@@ -61,7 +61,7 @@ class Scorer:
                 model_architecture=self.config["model"]["name"].lower(),
             )
 
-        if signal_config.get("hole_score", {}).get("enabled", False):
+        if signal_config.get("hole_mass", {}).get("enabled", False):
             estimators["hole_score"] = HoleScoreEstimator(
                 model=self.model,
                 model_architecture=self.config["model"]["name"].lower(),
