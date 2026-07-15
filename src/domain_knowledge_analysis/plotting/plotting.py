@@ -320,6 +320,7 @@ class Plotter:
         )
 
         group_labels = [
+            ("actual", "Actual data"),
             ("lowest", "Lowest H"),
             ("middle", "Middle H"),
             ("highest", "Highest H"),
