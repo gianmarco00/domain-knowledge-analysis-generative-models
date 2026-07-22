@@ -39,7 +39,16 @@ class Vae(nn.Module):
         x = torch.sigmoid(logits)
 
         return x
+    
+    def reconstruct_images(self, x):
+        device = next(self.parameters()).device
+        x = x.to(device)
 
+        mean, log_variance = self.encoder(x)
+        logits = self.decoder(mean)
+        reconstructed_x = torch.sigmoid(logits)
+
+        return reconstructed_x
 
 
     @staticmethod

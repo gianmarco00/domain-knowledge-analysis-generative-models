@@ -13,7 +13,9 @@ class Trainer:
         self.logger = logger
         self.checkpoint_manager = checkpoint_manager
 
-        self.num_images_to_log = 8
+        self.num_images_to_log = 36
+        self.num_images_to_reconstruct = 16
+        self.reconstruction_samples = next(iter(validate_dataloader))[0][:self.num_images_to_reconstruct].detach().cpu()
 
         self.model.to(self.device)
 
@@ -88,8 +90,9 @@ class Trainer:
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
 
-                if epoch % 2 == 0:
-                    self.generate_and_log_images("Images", epoch+1)
+                if (epoch+1) % 10 == 0 or epoch == 0:
+                    self.generate_and_log_random_images("Images/Random", epoch+1)
+                    self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch+1)
 
                 self.logger.flush()
 
@@ -97,14 +100,20 @@ class Trainer:
             self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history)
 
         if self.logger is not None:
-            self.generate_and_log_images(f"Images", epoch+1)
             self.logger.close()
 
         return self.history
 
-    def generate_and_log_images(self, name, epoch):
+    def generate_and_log_random_images(self, name, epoch):
         
         self.model.eval()
         with torch.no_grad():
             images = self.model.generate_images(self.num_images_to_log)
-            self.logger.log_images(name, images, epoch, self.num_images_to_log)
+            self.logger.log_images(name, images, epoch)
+
+    def generate_and_log_reconstructed_images(self, name, epoch):
+
+        self.model.eval()
+        with torch.no_grad():
+            reconstructed_samples = self.model.reconstruct_images(self.reconstruction_samples)
+            self.logger.log_image_pairs(name, self.reconstruction_samples, reconstructed_samples, epoch)
