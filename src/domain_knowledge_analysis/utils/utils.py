@@ -26,7 +26,7 @@ def set_seed(seed):
 def build_run_name(config):
     experiment_name = config["experiment"]["name"]
     learning_rate = config["training"]["learning_rate"]
-    timestamp = datetime.now().strftime("%m-%d_%H-%M-%S")
+    timestamp = datetime.now().strftime("%d_%b_%H%M").lower()
 
     return f"{experiment_name}_lr_{learning_rate}_{timestamp}"
 
