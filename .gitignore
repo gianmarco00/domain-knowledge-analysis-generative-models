@@ -11,3 +11,4 @@ dist/
 *.medmnist
 *.npz
 *.DS_Store
+*.bash_history
