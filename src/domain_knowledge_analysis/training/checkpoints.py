@@ -13,21 +13,24 @@ class CheckpointManager():
     def checkpoint_path(self, filename):
         return self.checkpoint_dir / filename
 
-    def save_checkpoint(self, model, optimizer, epoch, history, filename):
+    def save_checkpoint(self, model, optimizer, epoch, history, validation_loss, filename):
 
         torch.save({
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "epoch": epoch,
             "history": history,
-            "config": self.config
+            "config": self.config,
+            "validation_loss": validation_loss
         },
         self.checkpoint_path(filename)
         )
     
     def save_last(self, model, optimizer, epoch, history):
-
         self.save_checkpoint(model, optimizer, epoch, history, filename="last.pt")
+    
+    def save_best(self, model, optimizer, epoch, history, validation_loss):
+        self.save_checkpoint(model, optimizer, epoch, history, validation_loss, filename="best.pt")
 
 
     def load_model(self, model, checkpoint_path, device, optimizer=None):

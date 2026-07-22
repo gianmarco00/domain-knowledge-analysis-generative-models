@@ -17,6 +17,8 @@ class Trainer:
         self.num_images_to_reconstruct = 16
         self.reconstruction_samples = next(iter(validate_dataloader))[0][:self.num_images_to_reconstruct].detach().cpu()
 
+        self.best_validation_loss = float("inf")
+
         self.model.to(self.device)
 
         if start_weights != "random" and checkpoint_manager is None:
@@ -84,20 +86,28 @@ class Trainer:
                     "train_loss": train_loss,
                     "validation_loss": validation_loss
                 })
+            
+            if self.checkpoint_manager is not None:
+                if validation_loss < self.best_validation_loss:
+                    self.best_validation_loss = validation_loss
+                    self.checkpoint_manager.save_best(self.model, self.optimizer, epoch+1, self.history, validation_loss)
 
             if self.logger is not None:
 
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
 
-                if (epoch+1) % 10 == 0 or epoch == 0:
+                self.generate_and_log_random_images("Images/Random", epoch)
+                self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch)
+
+                if (epoch+1) % 10 == 0:
                     self.generate_and_log_random_images("Images/Random", epoch+1)
                     self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch+1)
 
                 self.logger.flush()
 
         if self.checkpoint_manager is not None:
-            self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history)
+            self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history, validation_loss)
 
         if self.logger is not None:
             self.logger.close()
