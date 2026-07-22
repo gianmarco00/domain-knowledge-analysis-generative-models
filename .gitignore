@@ -10,4 +10,4 @@ dist/
 *.gz
 *.medmnist
 *.npz
-
+*.DS_Store
