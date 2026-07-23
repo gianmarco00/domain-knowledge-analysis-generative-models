@@ -39,6 +39,9 @@ model:
 optimizer:
   name: adam
 
+lr_scheduler:
+  name: reduce_lr_on_plateau
+
 
 scoring:
   pretrained_model: Null

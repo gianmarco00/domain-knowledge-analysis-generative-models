@@ -33,6 +33,8 @@ class Experiment():
 
         optimizer = utils.create_optimizer(self.config, self.model)
 
+        lr_scheduler = utils.create_lr_scheduler(self.config, optimizer)
+
         train_dataloader, validation_dataloader = utils.create_training_dataloaders(self.config)
 
         loss = utils.create_loss(self.config)
@@ -45,6 +47,7 @@ class Experiment():
             train_dataloader=train_dataloader,
             validate_dataloader=validation_dataloader,
             optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
             loss=loss,
             epochs=self.config["training"]["epochs"],
             device=self.device,

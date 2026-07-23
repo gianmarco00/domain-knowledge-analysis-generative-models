@@ -2,11 +2,12 @@ import torch
 from tqdm import tqdm
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
         self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
         self.loss = loss
         self.epochs = epochs
         self.device = device
@@ -30,6 +31,7 @@ class Trainer:
         self.history = {
             "train_loss": [],
             "validation_loss": [],
+            "learning_rate": []
         }
     
     def train_epoch(self):
@@ -76,36 +78,45 @@ class Trainer:
 
         for epoch in progress_bar:
 
+            self.generate_and_log_random_images("Images/Random", epoch)
+            self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch)
+
             train_loss = self.train_epoch()
             validation_loss = self.validate_epoch()
+            
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step(validation_loss)
+            current_lr = self.optimizer.param_groups[0]["lr"]
 
             self.history["train_loss"].append(train_loss)
             self.history["validation_loss"].append(validation_loss)
+            self.history["learning_rate"].appenf(current_lr)
 
             progress_bar.set_postfix({
                     "train_loss": train_loss,
-                    "validation_loss": validation_loss
+                    "validation_loss": validation_loss,
+                    "learning_rate": current_lr
                 })
             
             if self.checkpoint_manager is not None:
                 if validation_loss < self.best_validation_loss:
                     self.best_validation_loss = validation_loss
-                    self.checkpoint_manager.save_best(self.model, self.optimizer, epoch+1, self.history, validation_loss)
+                    self.checkpoint_manager.save_best(self.model, self.optimizer, self.lr_scheduler, epoch+1, self.history, validation_loss)
 
             if self.logger is not None:
 
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
+                self.logger.log_scalar("Optimization/learning rate", current_lr, epoch+1)
 
-                if (epoch+1) % 10 == 0 or epoch == 0:
-                    actual_epoch = epoch + 1 if epoch != 0 else 0
-                    self.generate_and_log_random_images("Images/Random", actual_epoch)
-                    self.generate_and_log_reconstructed_images("Images/Reconstructed Images", actual_epoch)
+                if (epoch+1) % 10 == 0:
+                    self.generate_and_log_random_images("Images/Random", epoch+1)
+                    self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch+1)
 
                 self.logger.flush()
 
         if self.checkpoint_manager is not None:
-            self.checkpoint_manager.save_last(self.model, self.optimizer, self.epochs, self.history, validation_loss)
+            self.checkpoint_manager.save_last(self.model, self.optimizer, self.lr_scheduler, self.epochs, self.history, validation_loss)
 
         if self.logger is not None:
             self.logger.close()

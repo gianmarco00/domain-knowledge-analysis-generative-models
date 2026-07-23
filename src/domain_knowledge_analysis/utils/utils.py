@@ -76,6 +76,17 @@ def create_optimizer(config, model):
 
     raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
+def create_lr_scheduler(config, optimizer):
+    lr_scheduler_name = config["lr_scheduler"]["name"].lower()
+
+    if lr_scheduler_name is None:
+        return None
+
+    if lr_scheduler_name == "reduce_lr_on_plateau":
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+
+    raise ValueError(f"Unsupported scheduler {lr_scheduler_name}")
+
 
 def create_log_dir(config):
     runs_dir = Path(config["paths"]["runs_dir"])
