@@ -30,7 +30,7 @@ model:
   name: vae
 
   encoder:
-    latent_dim: 32
+    latent_dim: 16
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
