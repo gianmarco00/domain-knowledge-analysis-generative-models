@@ -3,14 +3,17 @@ import torch.nn as nn
 from .encoder import Encoder
 from .decoder import Decoder
 
+from torch.distributions import ContinuousBernoulli
+
 from domain_knowledge_analysis.math.gaussian import sample_gaussian
 
 class Vae(nn.Module):
-    def __init__(self, image_shape, encoder_params, decoder_params=None):
+    def __init__(self, image_shape, encoder_params, decoder_distribution_name, decoder_params=None):
         super(Vae, self).__init__()
 
         self.image_shape = image_shape
         self.encoder_params = encoder_params
+        self.decoder_distribution_name = decoder_distribution_name
 
         self.encoder = Encoder(self.image_shape, encoder_params)
 
@@ -30,13 +33,17 @@ class Vae(nn.Module):
         eps = torch.randn_like(std)
         return mean + eps*std
     
-    def generate_images(self, n_images):
+    def generate_images(self, n_images, latents=None):
 
         device = next(self.parameters()).device
-       
-        z = torch.randn(n_images, self.encoder_params["latent_dim"]).to(device)
+
+        if latents is not None:
+            z = latents.to(device)
+        else:
+            z = torch.randn(n_images, self.encoder_params["latent_dim"]).to(device)
+            
         logits = self.decoder(z)
-        x = torch.sigmoid(logits)
+        x = self.decoder_distribution(logits, self.decoder_distribution_name)
 
         return x
     
@@ -46,10 +53,15 @@ class Vae(nn.Module):
 
         mean, log_variance = self.encoder(x)
         logits = self.decoder(mean)
-        reconstructed_x = torch.sigmoid(logits)
+        reconstructed_x = self.decoder_distribution(logits, self.decoder_distribution_name)
 
         return reconstructed_x
 
+    def decoder_distribution(self, logits, decoder_distribution_name):
+        if decoder_distribution_name == "bernoulli":
+            return torch.sigmoid(logits)
+        elif decoder_distribution_name == "continuous_bernoulli":
+            return ContinuousBernoulli(logits=logits).mean
 
     @staticmethod
     def derive_decoder_params_from_encoder(encoder, encoder_params):

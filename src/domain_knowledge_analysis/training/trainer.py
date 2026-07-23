@@ -1,6 +1,8 @@
 import torch
 from tqdm import tqdm
 
+from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
+
 class Trainer:
     def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
         self.model = model
@@ -18,6 +20,10 @@ class Trainer:
         self.num_images_to_reconstruct = 16
         self.reconstruction_samples = next(iter(validate_dataloader))[0][:self.num_images_to_reconstruct].detach().cpu()
 
+        self.latent_dim = self.model.encoder_params["latent_dim"]
+        self.fixed_random_latents = sample_random_latents(self.num_images_to_log, self.latent_dim, create_random_generator(seed=0))
+        self.random_latents_generator = create_random_generator(seed=1)
+
         self.best_validation_loss = float("inf")
 
         self.model.to(self.device)
@@ -27,6 +33,7 @@ class Trainer:
 
         if start_weights != "random":
             self.model = checkpoint_manager.load_model(self.model, start_weights, self.device, self.optimizer)
+
 
         self.history = {
             "train_loss": [],
@@ -76,9 +83,6 @@ class Trainer:
 
         progress_bar = tqdm(range(self.epochs), desc="Training")
 
-        self.generate_and_log_random_images("Images/Random", 0)
-        self.generate_and_log_reconstructed_images("Images/Reconstructed Images", 0)
-
         for epoch in progress_bar:
 
             train_loss = self.train_epoch()
@@ -109,9 +113,9 @@ class Trainer:
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
                 self.logger.log_scalar("Optimization/learning rate", current_lr, epoch+1)
 
-                if (epoch+1) % 10 == 0:
-                    self.generate_and_log_random_images("Images/Random", epoch+1)
-                    self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch+1)
+                if (epoch+1) % 20 == 0 or epoch == 0:
+                    self.generate_and_log_random_images(epoch+1)
+                    self.generate_and_log_reconstructed_images(epoch+1)
 
                 self.logger.flush()
 
@@ -123,16 +127,21 @@ class Trainer:
 
         return self.history
 
-    def generate_and_log_random_images(self, name, epoch):
+    def generate_and_log_random_images(self, epoch):
         
         self.model.eval()
         with torch.no_grad():
-            images = self.model.generate_images(self.num_images_to_log)
-            self.logger.log_images(name, images, epoch)
+            images = self.model.generate_images(self.num_images_to_log, self.fixed_random_latents)
+            self.logger.log_images("Images/Fixed Latents", images, epoch)
 
-    def generate_and_log_reconstructed_images(self, name, epoch):
+            random_latents = sample_random_latents(self.num_images_to_log, self.latent_dim, self.random_latents_generator)
+            images = self.model.generate_images(self.num_images_to_log, random_latents)
+            self.logger.log_images("Images/Random Latents", images, epoch)
+
+        
+    def generate_and_log_reconstructed_images(self, epoch):
 
         self.model.eval()
         with torch.no_grad():
             reconstructed_samples = self.model.reconstruct_images(self.reconstruction_samples)
-            self.logger.log_image_pairs(name, self.reconstruction_samples, reconstructed_samples, epoch)
+            self.logger.log_image_pairs("Images/Reconstructed Images", self.reconstruction_samples, reconstructed_samples, epoch)

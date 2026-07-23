@@ -1,5 +1,5 @@
 from .dataset_utils import create_dataset, create_transform, create_training_dataloaders, create_scoring_dataloaders, create_calibration_dataloader
-from .utils import create_model, create_optimizer, create_lr_scheduler, create_loss, get_repo_root, set_seed, load_config, get_device, create_log_dir, build_run_name
+from .utils import create_model, create_optimizer, create_lr_scheduler, create_loss, get_repo_root, set_seed, load_config, get_device, create_log_dir, build_run_name, sample_random_latents, create_random_generator
 
 __all__ = [
     "create_dataset",
@@ -16,5 +16,7 @@ __all__ = [
     "get_device",
     "create_log_dir",
     "build_run_name",
-    "create_lr_scheduler"
+    "create_lr_scheduler",
+    "sample_random_latents",
+    "create_random_generator"
 ]

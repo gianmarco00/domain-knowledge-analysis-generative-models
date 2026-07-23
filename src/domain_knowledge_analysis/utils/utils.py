@@ -62,7 +62,8 @@ def create_model(config):
 
     if model_name == "vae":
         encoder_params = config["model"]["encoder"]
-        return Vae(image_shape=image_shape, encoder_params=encoder_params)
+        decoder_distribution_name = config["loss"]["log_prob_function"].lower()
+        return Vae(image_shape=image_shape, encoder_params=encoder_params, decoder_distribution_name=decoder_distribution_name)
 
     raise ValueError(f"Unsupported model: {model_name}")
 
@@ -78,12 +79,14 @@ def create_optimizer(config, model):
 
 def create_lr_scheduler(config, optimizer):
     lr_scheduler_name = config["lr_scheduler"]["name"].lower()
+    lr_scheduler_threshold = config["lr_scheduler"]["treshold"]
+    lr_scheduler_threshold_mode = config["lr_scheduler"]["mode"]
 
     if lr_scheduler_name is None:
         return None
 
     if lr_scheduler_name == "reduce_lr_on_plateau":
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=lr_scheduler_threshold, mode=lr_scheduler_threshold_mode)
 
     raise ValueError(f"Unsupported scheduler {lr_scheduler_name}")
 
@@ -103,21 +106,30 @@ def create_log_dir(config):
 
     return log_dir
 
+def create_random_generator(seed):
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    return generator
+
+def sample_random_latents(n_images, latent_dim, generator):
+    return torch.randn(n_images, latent_dim, generator=generator, device="cpu")
+
+def create_vae_decoder_distribution(config):  
+    decoder_distribution_name = config["loss"]["log_prob_function"].lower()
+
+    if decoder_distribution_name == "continuous_bernoulli":
+        return continuous_bernoulli_log_prob_from_logits
+    elif decoder_distribution_name == "bernoulli":
+        return bernoulli_log_prob_from_logits
+    else:
+        raise ValueError(f"Unsupported decoder distribution: {decoder_distribution_name}")
 
 def create_loss(config):
     model_name = config["model"]["name"].lower()
 
-    log_prob_function_name = (config.get("loss", {}).get("log_prob_function", "continuous_bernoulli").lower())
-
-    if model_name != "vae":
-        raise ValueError(f"Unsupported loss for model: {model_name}")
-
-    if log_prob_function_name == "continuous_bernoulli":
-        log_prob_function = continuous_bernoulli_log_prob_from_logits
-    elif log_prob_function_name == "bernoulli":
-        log_prob_function = bernoulli_log_prob_from_logits
-    else:
-        raise ValueError(f"Unsupported log probability function: "f"{log_prob_function_name}")
-
-    return partial(vae_loss, log_prob_function=log_prob_function)
+    if model_name == "vae":
+        log_prob_function = create_vae_decoder_distribution(config)
+        return partial(vae_loss, log_prob_function=log_prob_function)
+    
+    raise ValueError(f"Unsupported loss for model: {model_name}")
 
