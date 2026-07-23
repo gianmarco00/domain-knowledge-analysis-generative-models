@@ -97,12 +97,10 @@ class Trainer:
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
 
-                self.generate_and_log_random_images("Images/Random", epoch)
-                self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch)
-
-                if (epoch+1) % 10 == 0:
-                    self.generate_and_log_random_images("Images/Random", epoch+1)
-                    self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch+1)
+                if (epoch+1) % 10 == 0 or epoch == 0:
+                    actual_epoch = epoch + 1 if epoch != 0 else 0
+                    self.generate_and_log_random_images("Images/Random", actual_epoch)
+                    self.generate_and_log_reconstructed_images("Images/Reconstructed Images", actual_epoch)
 
                 self.logger.flush()
 

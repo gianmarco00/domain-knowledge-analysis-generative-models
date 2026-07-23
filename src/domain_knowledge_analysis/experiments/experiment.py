@@ -26,7 +26,7 @@ class Experiment():
         self.device = utils.get_device()
         print(f"Using device: {self.device}")
 
-        self.model = utils.create_model(self.config)
+        self.model = utils.create_model(self.config).to(self.device)
 
         
     def train(self):

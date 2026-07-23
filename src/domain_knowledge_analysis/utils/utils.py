@@ -1,5 +1,7 @@
 from pathlib import Path
 from datetime import datetime
+from functools import partial
+
 import random
 
 import yaml
@@ -7,6 +9,7 @@ import torch
 
 from domain_knowledge_analysis.models import Vae
 from domain_knowledge_analysis.losses import vae_loss
+from domain_knowledge_analysis.math import continuous_bernoulli_log_prob_from_logits, bernoulli_log_prob_from_logits
 
 
 
@@ -89,11 +92,21 @@ def create_log_dir(config):
 
     return log_dir
 
+
 def create_loss(config):
     model_name = config["model"]["name"].lower()
 
-    if model_name == "vae":
-        return vae_loss
+    log_prob_function_name = (config.get("loss", {}).get("log_prob_function", "continuous_bernoulli").lower())
 
-    raise ValueError(f"Unsupported loss for model: {model_name}")
+    if model_name != "vae":
+        raise ValueError(f"Unsupported loss for model: {model_name}")
+
+    if log_prob_function_name == "continuous_bernoulli":
+        log_prob_function = continuous_bernoulli_log_prob_from_logits
+    elif log_prob_function_name == "bernoulli":
+        log_prob_function = bernoulli_log_prob_from_logits
+    else:
+        raise ValueError(f"Unsupported log probability function: "f"{log_prob_function_name}")
+
+    return partial(vae_loss, log_prob_function=log_prob_function)
 

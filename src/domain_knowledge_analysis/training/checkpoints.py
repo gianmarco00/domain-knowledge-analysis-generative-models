@@ -26,8 +26,8 @@ class CheckpointManager():
         self.checkpoint_path(filename)
         )
     
-    def save_last(self, model, optimizer, epoch, history):
-        self.save_checkpoint(model, optimizer, epoch, history, filename="last.pt")
+    def save_last(self, model, optimizer, epoch, history, validation_loss):
+        self.save_checkpoint(model, optimizer, epoch, history, validation_loss, filename="last.pt")
     
     def save_best(self, model, optimizer, epoch, history, validation_loss):
         self.save_checkpoint(model, optimizer, epoch, history, validation_loss, filename="best.pt")

@@ -18,6 +18,7 @@ class Decoder(nn.Module):
         start_shape = params["last_shape_before_flattening"]
 
         self.fc = nn.Linear(params["latent_dim"], fc_neurons)
+        self.fc_activation = nn.LeakyReLU()
 
         self.unflatten = nn.Unflatten(
             dim=1,
@@ -53,6 +54,7 @@ class Decoder(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
+        x = self.fc_activation(x)
         x = self.unflatten(x)
         x = self.conv_transpose(x)
 
