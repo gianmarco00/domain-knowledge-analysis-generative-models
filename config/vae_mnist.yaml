@@ -18,7 +18,7 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 100
+  epochs: 200
   learning_rate: 0.001
   start_weights: random
 
@@ -41,7 +41,7 @@ optimizer:
 
 
 scoring:
-  pretrained_model: runs/vae_mnist_lr_0.001_07-06_17-06-31/checkpoints/last.pt
+  pretrained_model: Null
   out_distribution_datasets: [fashion_mnist, organamnist, kmnist]
 
   dataloader:
