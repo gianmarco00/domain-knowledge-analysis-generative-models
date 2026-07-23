@@ -58,7 +58,7 @@ class CheckpointManager():
 
         if self.config is not None:
             if self.model_config["lr_scheduler"]["name"].lower() != self.config["lr_scheduler"]["name"].lower():
-                raise ValueError(f"Pretrained model was using scheduler {self.model_config["lr_scheduler"]["name"]} and not {self.config["lr_scheduler"]["name"]}")
+                raise ValueError(f"Pretrained model was using scheduler {self.model_config['lr_scheduler']['name']} and not {self.config['lr_scheduler']['name']}")
 
         if lr_scheduler is not None and lr_scheduler_state is not None:
             lr_scheduler.load_state_dict(lr_scheduler_state)

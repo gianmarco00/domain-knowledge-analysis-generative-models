@@ -53,13 +53,13 @@ scoring:
 
   signals:
     likelihood:
-      enabled: false
+      enabled: true
     typicality:
-      enabled: false
+      enabled: true
     gradnorm:
-      enabled: false
+      enabled: true
     latent_encoding:
-      enabled: false
+      enabled: true
     hole_mass:
       enabled: true
 

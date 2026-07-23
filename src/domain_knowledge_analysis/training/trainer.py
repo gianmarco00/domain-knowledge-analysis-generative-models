@@ -76,10 +76,10 @@ class Trainer:
 
         progress_bar = tqdm(range(self.epochs), desc="Training")
 
-        for epoch in progress_bar:
+        self.generate_and_log_random_images("Images/Random", 0)
+        self.generate_and_log_reconstructed_images("Images/Reconstructed Images", 0)
 
-            self.generate_and_log_random_images("Images/Random", epoch)
-            self.generate_and_log_reconstructed_images("Images/Reconstructed Images", epoch)
+        for epoch in progress_bar:
 
             train_loss = self.train_epoch()
             validation_loss = self.validate_epoch()
@@ -90,7 +90,7 @@ class Trainer:
 
             self.history["train_loss"].append(train_loss)
             self.history["validation_loss"].append(validation_loss)
-            self.history["learning_rate"].appenf(current_lr)
+            self.history["learning_rate"].append(current_lr)
 
             progress_bar.set_postfix({
                     "train_loss": train_loss,
