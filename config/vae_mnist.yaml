@@ -42,7 +42,7 @@ optimizer:
 lr_scheduler:
   name: reduce_lr_on_plateau
   treshold: 0.5
-  mode: abs
+  treshold_mode: abs
 
 
 scoring:
