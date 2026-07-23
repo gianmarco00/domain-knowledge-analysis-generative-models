@@ -86,7 +86,7 @@ def create_lr_scheduler(config, optimizer):
         return None
 
     if lr_scheduler_name == "reduce_lr_on_plateau":
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=lr_scheduler_threshold, mode=lr_scheduler_threshold_mode)
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=lr_scheduler_threshold, threshold_mode=lr_scheduler_threshold_mode)
 
     raise ValueError(f"Unsupported scheduler {lr_scheduler_name}")
 
