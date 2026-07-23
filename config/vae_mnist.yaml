@@ -22,6 +22,10 @@ training:
   learning_rate: 0.001
   start_weights: random
 
+loss:
+  name: vae_loss
+  log_prob_function: continuous_bernoulli
+
 model:
   name: vae
 
