@@ -3,8 +3,7 @@ import torch.nn as nn
 from .encoder import Encoder
 from .decoder import Decoder
 
-from torch.distributions import ContinuousBernoulli
-
+from domain_knowledge_analysis.math.bernoulli import continuous_bernoulli_probs_from_logits
 from domain_knowledge_analysis.math.gaussian import sample_gaussian
 
 class Vae(nn.Module):
@@ -60,8 +59,8 @@ class Vae(nn.Module):
     def decoder_distribution(self, logits, decoder_distribution_name):
         if decoder_distribution_name == "bernoulli":
             return torch.sigmoid(logits)
-        elif decoder_distribution_name == "continuous_bernoulli":
-            return ContinuousBernoulli(logits=logits).mean
+        elif self.decoder_distribution_name == "continuous_bernoulli":
+            return continuous_bernoulli_probs_from_logits(logits)
 
     @staticmethod
     def derive_decoder_params_from_encoder(encoder, encoder_params):
