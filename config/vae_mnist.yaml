@@ -18,7 +18,7 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 200
+  epochs: 350
   learning_rate: 0.001
   start_weights: random
 
@@ -30,7 +30,7 @@ model:
   name: vae
 
   encoder:
-    latent_dim: 16
+    latent_dim: 32
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
@@ -40,9 +40,14 @@ optimizer:
   name: adam
 
 lr_scheduler:
-  name: reduce_lr_on_plateau
-  treshold: 0.5
-  treshold_mode: abs
+  name: null
+  mode: min
+  threshold: 0.5
+  threshold_mode: abs
+  min_lr: 0.00001
+  factor: 0.1 
+  patience: 30
+  cooldown: 5
 
 
 scoring:
