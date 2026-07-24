@@ -85,6 +85,7 @@ class GradNormEstimator:
                 logits,
                 mean,
                 log_variance,
+                log_prob_function=self.log_prob_function
             )
 
             gradients = torch.autograd.grad(

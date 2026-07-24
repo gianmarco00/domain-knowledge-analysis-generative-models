@@ -24,7 +24,7 @@ training:
 
 loss:
   name: vae_loss
-  log_prob_function: bernoulli
+  log_prob_function: continuous_bernoulli
 
 model:
   name: vae

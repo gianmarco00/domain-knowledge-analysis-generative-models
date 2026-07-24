@@ -36,7 +36,8 @@ class NLLEstimator:
                 x, 
                 logits, 
                 mean, 
-                log_variance
+                log_variance,
+                log_prob_function=self.log_prob_function
             )
 
             return nll_per_image
