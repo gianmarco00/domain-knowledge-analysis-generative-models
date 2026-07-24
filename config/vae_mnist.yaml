@@ -18,9 +18,9 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 350
+  epochs: 50
   learning_rate: 0.001
-  start_weights: random
+  start_weights: runs/vae_mnist_lr_0.001_24_jul_1606/checkpoints/best.pt
 
 loss:
   name: vae_loss
@@ -45,14 +45,14 @@ lr_scheduler:
   threshold: 0.5
   threshold_mode: abs
   min_lr: 0.00001
-  factor: 0.5 
+  factor: 0.1
   patience: 15
   cooldown: 5
-  start_epoch: 250
+  start_epoch: 0
 
 
 scoring:
-  pretrained_model: Null
+  pretrained_model: null
   out_distribution_datasets: [fashion_mnist, organamnist, kmnist]
 
   dataloader:

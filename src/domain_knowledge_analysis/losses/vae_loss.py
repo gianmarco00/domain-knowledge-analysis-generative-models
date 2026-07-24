@@ -5,7 +5,7 @@ def negative_vae_elbo_per_image(x, logits, mean, log_variance, log_prob_function
 
     reconstruction_loss = log_prob_function(x, logits)
 
-    kl_loss = kl_divergence(mean, log_variance)
+    kl_loss = 3 * kl_divergence(mean, log_variance)
 
     elbo_loss_per_image = elbo_per_image(reconstruction_loss, kl_loss)
 
