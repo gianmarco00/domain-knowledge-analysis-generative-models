@@ -4,12 +4,13 @@ from tqdm import tqdm
 from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
+        self.lr_scheduler_start_epoch = lr_scheduler_start_epoch
         self.loss = loss
         self.epochs = epochs
         self.device = device
@@ -88,7 +89,7 @@ class Trainer:
             train_loss = self.train_epoch()
             validation_loss = self.validate_epoch()
             
-            if self.lr_scheduler is not None:
+            if self.lr_scheduler is not None and epoch > self.lr_scheduler_start_epoch:
                 self.lr_scheduler.step(validation_loss)
             current_lr = self.optimizer.param_groups[0]["lr"]
 

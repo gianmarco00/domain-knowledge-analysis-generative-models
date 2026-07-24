@@ -1,6 +1,7 @@
 import torch
 from torch.distributions import ContinuousBernoulli
 
+
 def bernoulli_log_prob_from_logits(x, logits):
 
     if not (x.shape == logits.shape):
@@ -17,6 +18,15 @@ def bernoulli_log_prob_from_logits(x, logits):
     return log_prob
 
 
+CONTINUOUS_BERNOULLI_EPS = 1e-4
+
+
+def continuous_bernoulli_probs_from_logits(logits):
+    """Convert decoder logits to the bounded CB parameter lambda."""
+    return torch.sigmoid(logits).clamp(
+        min=CONTINUOUS_BERNOULLI_EPS,
+        max=1.0 - CONTINUOUS_BERNOULLI_EPS,
+    )
 
 def continuous_bernoulli_log_prob_from_logits(x, logits):
     if x.shape != logits.shape:
@@ -31,8 +41,9 @@ def continuous_bernoulli_log_prob_from_logits(x, logits):
             "at least one feature dimension."
         )
 
-    distribution = ContinuousBernoulli(logits=logits)
+    lambda_ = continuous_bernoulli_probs_from_logits(logits)
 
+    distribution = ContinuousBernoulli(probs=lambda_)
     log_prob_per_pixel = distribution.log_prob(x)
 
     return log_prob_per_pixel.flatten(start_dim=1).sum(dim=1)

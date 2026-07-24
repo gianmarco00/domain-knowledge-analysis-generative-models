@@ -54,6 +54,7 @@ class CheckpointManager():
         if optimizer is not None:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
+        """
         lr_scheduler_state = checkpoint.get("lr_scheduler_state_dict")
 
         if self.config is not None:
@@ -62,7 +63,8 @@ class CheckpointManager():
 
         if lr_scheduler is not None and lr_scheduler_state is not None:
             lr_scheduler.load_state_dict(lr_scheduler_state)
-
+        """
+        
         return model
         
 

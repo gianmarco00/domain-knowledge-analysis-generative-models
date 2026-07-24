@@ -4,6 +4,7 @@ from tqdm import tqdm
 from domain_knowledge_analysis.losses import negative_vae_elbo_per_image
 from domain_knowledge_analysis.math import fit_diagonal_gaussian, gaussian_log_prob
 
+from domain_knowledge_analysis.math.bernoulli import bernoulli_log_prob_from_logits, continuous_bernoulli_log_prob_from_logits
 
 class GradNormEstimator:
     def __init__(
@@ -16,6 +17,13 @@ class GradNormEstimator:
         self.model_architecture = model_architecture
         self.calibration_dataloader = calibration_dataloader
         self.device = next(self.model.parameters()).device
+
+        if self.model.decoder_distribution_name == "bernoulli":
+            self.log_prob_function = bernoulli_log_prob_from_logits
+        elif self.model.decoder_distribution_name == "continuous_bernoulli":
+            self.log_prob_function = continuous_bernoulli_log_prob_from_logits
+        else:
+            raise ValueError("Unsupported decoder distribution: "f"{self.model.decoder_distribution_name}")
 
         self.model_layers_names = [
             name

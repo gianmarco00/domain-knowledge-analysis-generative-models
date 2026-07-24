@@ -73,6 +73,10 @@ def create_dataset(config, dataset_name, train):
         raise ValueError(
             f"Unsupported dataset: {dataset_name}"
         )
+    
+    if config["model"] == "vae" and config["loss"]["log_prob_function"].lower() == "continuous_bernoulli":
+        dequantization_seed = config["seed"] + (0 if train else 1_000_000)
+        dataset = UniformDequantizedDataset(dataset=dataset, seed=dequantization_seed)
 
     actual_shape = tuple(dataset[0][0].shape)
 
@@ -273,3 +277,34 @@ def create_medmnist_dataset(
         download=True,
         transform=transform,
     )
+
+
+class UniformDequantizedDataset(Dataset):
+    """Apply fixed uniform dequantization: (pixel + U[0, 1)) / 256."""
+
+    def __init__(self, dataset, seed):
+        self.dataset = dataset
+        self.seed = seed
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        sample = self.dataset[index]
+        image = sample[0]
+
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + index)
+
+        noise = torch.rand(
+            image.shape,
+            generator=generator,
+            dtype=image.dtype,
+        )
+
+        # Prevent an exactly-zero floating-point draw.
+        noise = noise.clamp_min(torch.finfo(image.dtype).eps)
+
+        image = (image * 255.0 + noise) / 256.0
+
+        return (image, *sample[1:])

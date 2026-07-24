@@ -86,12 +86,13 @@ def create_lr_scheduler(config, optimizer):
     lr_scheduler_patience = config["lr_scheduler"]["patience"]
     lr_scheduler_cooldown = config["lr_scheduler"]["cooldown"]
     lr_scheduler_mode = config["lr_scheduler"]["mode"]
+    lr_scheduler_start_epoch = config["lr_scheduler"]["start_epoch"]
 
     if lr_scheduler_name is None:
         return None
 
     if lr_scheduler_name == "reduce_lr_on_plateau":
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=lr_scheduler_threshold, threshold_mode=lr_scheduler_threshold_mode, min_lr=lr_scheduler_min_lr, factor=lr_scheduler_factor, patience=lr_scheduler_patience, cooldown=lr_scheduler_cooldown, mode=lr_scheduler_mode)
+        return (torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=lr_scheduler_threshold, threshold_mode=lr_scheduler_threshold_mode, min_lr=lr_scheduler_min_lr, factor=lr_scheduler_factor, patience=lr_scheduler_patience, cooldown=lr_scheduler_cooldown, mode=lr_scheduler_mode), lr_scheduler_start_epoch)
 
     raise ValueError(f"Unsupported scheduler {lr_scheduler_name}")
 

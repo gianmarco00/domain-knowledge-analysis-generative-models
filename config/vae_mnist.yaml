@@ -24,13 +24,13 @@ training:
 
 loss:
   name: vae_loss
-  log_prob_function: continuous_bernoulli
+  log_prob_function: bernoulli
 
 model:
   name: vae
 
   encoder:
-    latent_dim: 32
+    latent_dim: 16
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
@@ -40,14 +40,15 @@ optimizer:
   name: adam
 
 lr_scheduler:
-  name: null
+  name: reduce_lr_on_plateau
   mode: min
   threshold: 0.5
   threshold_mode: abs
   min_lr: 0.00001
-  factor: 0.1 
-  patience: 30
+  factor: 0.5 
+  patience: 15
   cooldown: 5
+  start_epoch: 250
 
 
 scoring:
