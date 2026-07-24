@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, random_split, ConcatDataset
+from torch.utils.data import DataLoader, random_split, ConcatDataset, Dataset
 from torchvision import datasets, transforms
 
 import medmnist
@@ -74,7 +74,7 @@ def create_dataset(config, dataset_name, train):
             f"Unsupported dataset: {dataset_name}"
         )
     
-    if config["model"] == "vae" and config["loss"]["log_prob_function"].lower() == "continuous_bernoulli":
+    if config["model"]["name"] == "vae" and config["loss"]["log_prob_function"].lower() == "continuous_bernoulli":
         dequantization_seed = config["seed"] + (0 if train else 1_000_000)
         dataset = UniformDequantizedDataset(dataset=dataset, seed=dequantization_seed)
 
