@@ -134,8 +134,9 @@ def create_loss(config):
     model_name = config["model"]["name"].lower()
 
     if model_name == "vae":
+        beta = config["loss"]["beta"]
         log_prob_function = create_vae_decoder_distribution(config)
-        return partial(vae_loss, log_prob_function=log_prob_function)
+        return partial(vae_loss, beta=beta, log_prob_function=log_prob_function)
     
     raise ValueError(f"Unsupported loss for model: {model_name}")
 

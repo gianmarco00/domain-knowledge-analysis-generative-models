@@ -25,6 +25,7 @@ training:
 loss:
   name: vae_loss
   log_prob_function: bernoulli
+  beta: 6
 
 model:
   name: vae
@@ -61,11 +62,11 @@ scoring:
 
   signals:
     likelihood:
-      enabled: true
+      enabled: false
     typicality:
-      enabled: true
+      enabled: false
     gradnorm:
-      enabled: true
+      enabled: false
     latent_encoding:
       enabled: true
     hole_mass:
