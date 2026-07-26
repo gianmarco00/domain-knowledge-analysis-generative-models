@@ -64,10 +64,7 @@ class HoleScoreEstimator:
         validation_h = self.estimate_h(validation_latents)
         self.hole_threshold = torch.quantile(validation_h, 0.99)
 
-        actual_images = torch.stack(
-            actual_images[:self.n_images],
-            dim=0,
-        )
+        actual_images = torch.stack(actual_images[:self.n_images], dim=0)
 
         self.summary = self.compute_prior_summary(actual_images)
 
