@@ -25,13 +25,13 @@ training:
 loss:
   name: vae_loss
   log_prob_function: bernoulli
-  beta: 6
+  beta: 1
 
 model:
   name: vae
 
   encoder:
-    latent_dim: 16
+    latent_dim: 8
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
