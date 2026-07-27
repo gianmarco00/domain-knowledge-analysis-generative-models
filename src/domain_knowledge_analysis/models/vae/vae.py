@@ -31,8 +31,12 @@ class Vae(nn.Module):
         std = torch.exp(0.5*log_variance)
         eps = torch.randn_like(std)
         return mean + eps*std
-    
+
+    @torch.no_grad()
     def generate_images(self, n_images, latents=None):
+
+        self.was_training = self.training
+        self.eval()
 
         device = next(self.parameters()).device
 
@@ -44,15 +48,26 @@ class Vae(nn.Module):
         logits = self.decoder(z)
         x = self.decoder_distribution(logits, self.decoder_distribution_name)
 
+        if self.was_training:
+            self.train()
+
         return x
     
+    @torch.no_grad()
     def reconstruct_images(self, x):
+
+        self.was_training = self.training
+        self.eval() 
+
         device = next(self.parameters()).device
         x = x.to(device)
 
         mean, log_variance = self.encoder(x)
         logits = self.decoder(mean)
         reconstructed_x = self.decoder_distribution(logits, self.decoder_distribution_name)
+
+        if self.was_training:
+            self.train()
 
         return reconstructed_x
 

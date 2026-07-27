@@ -1,26 +1,27 @@
-from domain_knowledge_analysis.math import elbo_per_image, bernoulli_log_prob_from_logits, kl_divergence, continuous_bernoulli_log_prob_from_logits
 import torch
 
-def negative_vae_elbo_per_image(x, logits, mean, log_variance, beta, log_prob_function):
-
-    reconstruction_loss = log_prob_function(x, logits)
-
-    kl_loss = beta * kl_divergence(mean, log_variance)
-
-    elbo_loss_per_image = elbo_per_image(reconstruction_loss, kl_loss)
-
-    return -elbo_loss_per_image
+from domain_knowledge_analysis.math import elbo_per_image, kl_divergence
 
 
-def vae_loss(x, logits, mean, log_variance, beta, log_prob_function):
+class VAELoss(torch.nn.Module):
+    def __init__(self, log_prob_function, beta=1.0):
+        super().__init__()
+        self.beta = beta
+        self.log_prob_function = log_prob_function
+        self._components = {}
 
-    elbo_loss = negative_vae_elbo_per_image(
-        x, 
-        logits, 
-        mean, 
-        log_variance,
-        beta,
-        log_prob_function=log_prob_function
-    )
+    def negative_elbo_per_image(self, x, logits, mean, log_variance):
+        reconstruction_log_prob = self.log_prob_function(x, logits)
+        kl_loss = self.beta * kl_divergence(mean, log_variance)
+        negative_elbo = -elbo_per_image(reconstruction_log_prob, kl_loss)
 
-    return torch.mean(elbo_loss)
+        self._components = {"reconstruction loss": -reconstruction_log_prob.detach(), "kl loss": kl_loss.detach()}
+
+        return negative_elbo
+
+    def forward(self, x, logits, mean, log_variance):
+        negative_elbo = self.negative_elbo_per_image(x, logits, mean, log_variance)
+        return torch.mean(negative_elbo)
+
+    def components(self):
+        return self._components

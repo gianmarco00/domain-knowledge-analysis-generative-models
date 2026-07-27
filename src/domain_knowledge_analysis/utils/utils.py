@@ -8,7 +8,7 @@ import yaml
 import torch
 
 from domain_knowledge_analysis.models import Vae
-from domain_knowledge_analysis.losses import vae_loss
+from domain_knowledge_analysis.losses import VAELoss
 from domain_knowledge_analysis.math import continuous_bernoulli_log_prob_from_logits, bernoulli_log_prob_from_logits
 
 
@@ -136,7 +136,8 @@ def create_loss(config):
     if model_name == "vae":
         beta = config["loss"]["beta"]
         log_prob_function = create_vae_decoder_distribution(config)
-        return partial(vae_loss, beta=beta, log_prob_function=log_prob_function)
+        vae_loss = VAELoss(log_prob_function=log_prob_function, beta=beta)
+        return vae_loss
     
     raise ValueError(f"Unsupported loss for model: {model_name}")
 
