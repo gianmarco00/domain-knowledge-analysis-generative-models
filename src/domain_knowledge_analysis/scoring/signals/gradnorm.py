@@ -1,8 +1,8 @@
 import torch
 from tqdm import tqdm
 
-from domain_knowledge_analysis.losses import negative_vae_elbo_per_image
 from domain_knowledge_analysis.math import fit_diagonal_gaussian, gaussian_log_prob
+from domain_knowledge_analysis.losses import VAELoss
 
 from domain_knowledge_analysis.math.bernoulli import bernoulli_log_prob_from_logits, continuous_bernoulli_log_prob_from_logits
 
@@ -24,6 +24,8 @@ class GradNormEstimator:
             self.log_prob_function = continuous_bernoulli_log_prob_from_logits
         else:
             raise ValueError("Unsupported decoder distribution: "f"{self.model.decoder_distribution_name}")
+        
+        self.vae_loss = VAELoss(log_prob_function=self.log_prob_function, beta=1.0)
 
         self.model_layers_names = [
             name
@@ -80,13 +82,7 @@ class GradNormEstimator:
 
             logits, mean, log_variance = self.model(image)
 
-            loss = negative_vae_elbo_per_image(
-                image,
-                logits,
-                mean,
-                log_variance,
-                log_prob_function=self.log_prob_function
-            )
+            loss = self.vae_loss.negative_elbo_per_image(image, logits, mean, log_variance)
 
             gradients = torch.autograd.grad(
                 outputs=loss,

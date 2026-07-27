@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from torch.distributions import ContinuousBernoulli
+
 from .encoder import Encoder
 from .decoder import Decoder
 
@@ -75,7 +77,9 @@ class Vae(nn.Module):
         if decoder_distribution_name == "bernoulli":
             return torch.sigmoid(logits)
         elif self.decoder_distribution_name == "continuous_bernoulli":
-            return continuous_bernoulli_probs_from_logits(logits)
+            #return continuous_bernoulli_probs_from_logits(logits)
+            return ContinuousBernoulli(logits=logits).mean
+        
 
     @staticmethod
     def derive_decoder_params_from_encoder(encoder, encoder_params):

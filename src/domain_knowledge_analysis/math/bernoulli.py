@@ -19,27 +19,11 @@ def bernoulli_log_prob_from_logits(x, logits):
 
 
 CONTINUOUS_BERNOULLI_EPS = 1e-4
-
-
+"""
 def continuous_bernoulli_probs_from_logits(logits):
-    """Convert decoder logits to the bounded CB parameter lambda."""
-    return torch.sigmoid(logits).clamp(
-        min=CONTINUOUS_BERNOULLI_EPS,
-        max=1.0 - CONTINUOUS_BERNOULLI_EPS,
-    )
+    return torch.sigmoid(logits).clamp(min=CONTINUOUS_BERNOULLI_EPS, max=1.0 - CONTINUOUS_BERNOULLI_EPS)
 
 def continuous_bernoulli_log_prob_from_logits(x, logits):
-    if x.shape != logits.shape:
-        raise ValueError(
-            f"Shape mismatch: x has shape {x.shape}, "
-            f"but logits has shape {logits.shape}."
-        )
-
-    if x.dim() < 2:
-        raise ValueError(
-            "Input must contain a batch dimension and "
-            "at least one feature dimension."
-        )
 
     lambda_ = continuous_bernoulli_probs_from_logits(logits)
 
@@ -47,4 +31,8 @@ def continuous_bernoulli_log_prob_from_logits(x, logits):
     log_prob_per_pixel = distribution.log_prob(x)
 
     return log_prob_per_pixel.flatten(start_dim=1).sum(dim=1)
+"""
+def continuous_bernoulli_log_prob_from_logits(x, logits):
+    distribution = ContinuousBernoulli(logits=logits)
+    return distribution.log_prob(x).flatten(start_dim=1).sum(dim=1)
 

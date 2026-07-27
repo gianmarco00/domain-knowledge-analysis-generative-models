@@ -1,5 +1,6 @@
 import torch
 from tqdm import tqdm
+from collections import defaultdict
 
 from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
 
@@ -41,32 +42,43 @@ class Trainer:
             "validation_loss": [],
             "learning_rate": []
         }
-    
-    def train_epoch(self):
 
+    def train_epoch(self):
         self.model.train()
-        total_loss = 0
+
+        total_loss = 0.0
         total_samples = 0
+        total_loss_components = defaultdict(float)
 
         for batch in self.train_dataloader:
-
             x = batch[0].to(self.device)
+            batch_size = len(x)
+
             self.optimizer.zero_grad()
             logits, mean, log_variance = self.model(x)
             loss_value = self.loss(x, logits, mean, log_variance)
             loss_value.backward()
             self.optimizer.step()
 
-            total_loss += loss_value.item() * len(x)
-            total_samples += len(x)
+            total_loss += loss_value.item() * batch_size
+            total_samples += batch_size
 
-        return total_loss / total_samples
+            if callable(getattr(self.loss, "components", None)):
+                for name, value in self.loss.components().items():
+                    total_loss_components[name] += torch.sum(value).item()
+
+        mean_loss = total_loss / total_samples
+        mean_loss_components = {name: value / total_samples for name, value in total_loss_components.items()}
+
+        return mean_loss, mean_loss_components
     
     def validate_epoch(self):
 
         self.model.eval()
         total_loss = 0
         total_samples = 0
+
+        total_loss_components = defaultdict(float)
 
         with torch.no_grad():
             for batch in self.validate_dataloader:
@@ -77,8 +89,15 @@ class Trainer:
 
                 total_loss += loss_value.item() * len(x)
                 total_samples += len(x)
+            
+            if callable(getattr(self.loss, "components", None)):
+                for name, value in self.loss.components().items():
+                    total_loss_components[name] += torch.sum(value).item()
 
-        return total_loss / total_samples
+        mean_loss = total_loss / total_samples
+        mean_loss_components = {name: value / total_samples for name, value in total_loss_components.items()}
+
+        return mean_loss, mean_loss_components
     
     def fit(self):
 
@@ -86,8 +105,8 @@ class Trainer:
 
         for epoch in progress_bar:
 
-            train_loss = self.train_epoch()
-            validation_loss = self.validate_epoch()
+            train_loss, train_loss_components = self.train_epoch()
+            validation_loss, validation_loss_components = self.validate_epoch()
             
             if self.lr_scheduler is not None and epoch > self.lr_scheduler_start_epoch:
                 self.lr_scheduler.step(validation_loss)
@@ -113,6 +132,14 @@ class Trainer:
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)
                 self.logger.log_scalar("Loss/validation", validation_loss, epoch+1)
                 self.logger.log_scalar("Optimization/learning rate", current_lr, epoch+1)
+
+                if train_loss_components:
+                    for name, value in train_loss_components.items():
+                        self.logger.log_scalar(f"Loss Components/{name}/train", value, epoch+1)
+
+                if validation_loss_components:
+                    for name, value in validation_loss_components.items():
+                        self.logger.log_scalar(f"Loss Components/{name}/validation", value, epoch+1)
 
                 if (epoch+1) % 20 == 0 or epoch == 0:
                     self.generate_and_log_random_images(epoch+1)
