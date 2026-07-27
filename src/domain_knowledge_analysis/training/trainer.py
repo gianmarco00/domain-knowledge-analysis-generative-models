@@ -135,11 +135,11 @@ class Trainer:
 
                 if train_loss_components:
                     for name, value in train_loss_components.items():
-                        self.logger.log_scalar(f"Loss Components/{name}/train", value, epoch+1)
+                        self.logger.log_scalar(f"{name}/train", value, epoch+1)
 
                 if validation_loss_components:
                     for name, value in validation_loss_components.items():
-                        self.logger.log_scalar(f"Loss Components/{name}/validation", value, epoch+1)
+                        self.logger.log_scalar(f"{name}/validation", value, epoch+1)
 
                 if (epoch+1) % 20 == 0 or epoch == 0:
                     self.generate_and_log_random_images(epoch+1)

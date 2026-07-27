@@ -5,7 +5,6 @@ from torch.distributions import ContinuousBernoulli
 from .encoder import Encoder
 from .decoder import Decoder
 
-from domain_knowledge_analysis.math.bernoulli import continuous_bernoulli_probs_from_logits
 from domain_knowledge_analysis.math.gaussian import sample_gaussian
 
 class Vae(nn.Module):
@@ -77,8 +76,9 @@ class Vae(nn.Module):
         if decoder_distribution_name == "bernoulli":
             return torch.sigmoid(logits)
         elif self.decoder_distribution_name == "continuous_bernoulli":
+            return torch.sigmoid(logits)
             #return continuous_bernoulli_probs_from_logits(logits)
-            return ContinuousBernoulli(logits=logits).mean
+            #return ContinuousBernoulli(logits=logits).mean
         
 
     @staticmethod

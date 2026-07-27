@@ -15,7 +15,7 @@ class VAELoss(torch.nn.Module):
         kl_loss = self.beta * kl_divergence(mean, log_variance)
         negative_elbo = -elbo_per_image(reconstruction_log_prob, kl_loss)
 
-        self._components = {"reconstruction loss": -reconstruction_log_prob.detach(), "kl loss": kl_loss.detach()}
+        self._components = {"Reconstruction Loss": -reconstruction_log_prob.detach(), "KL Loss": kl_loss.detach()}
 
         return negative_elbo
 
