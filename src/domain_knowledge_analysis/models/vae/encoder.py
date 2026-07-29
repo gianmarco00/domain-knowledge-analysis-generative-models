@@ -30,7 +30,7 @@ class Encoder(nn.Module):
                     padding=p,
                 )
             )
-            #layers.append(nn.BatchNorm2d(out_ch))
+            layers.append(nn.BatchNorm2d(out_ch))
             layers.append(nn.LeakyReLU())
 
         self.conv = nn.Sequential(*layers)

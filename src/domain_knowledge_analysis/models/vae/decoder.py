@@ -47,7 +47,7 @@ class Decoder(nn.Module):
             )
 
             if n_layer < len(out_channels) - 1:
-                #layers.append(nn.BatchNorm2d(out_ch))
+                layers.append(nn.BatchNorm2d(out_ch))
                 layers.append(nn.LeakyReLU())
 
         self.conv_transpose = nn.Sequential(*layers)
