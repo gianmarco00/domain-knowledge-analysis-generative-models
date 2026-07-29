@@ -24,8 +24,8 @@ training:
 
 loss:
   name: vae_loss
-  log_prob_function: continuous_bernoulli
-  beta: 6
+  log_prob_function: bernoulli
+  beta: 1
 
 model:
   name: vae
@@ -36,6 +36,9 @@ model:
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
     paddings: [1, 1, 1, 1]
+
+  decoder:
+    symmetrical: false
 
 optimizer:
   name: adam
