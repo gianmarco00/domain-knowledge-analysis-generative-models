@@ -32,7 +32,7 @@ def build_run_name(config):
     timestamp = datetime.now().strftime("%d_%b_%H%M").lower()
 
     if config["model"]["name"] == "vae":
-        latent_dims = config["encoder"]["latent_dim"]
+        latent_dims = config["model"]["encoder"]["latent_dim"]
         beta = config["loss"]["beta"]
         loss = "CB" if config["loss"]["log_prob_function"] == "continuous_bernoulli" else "B"
         return f"{experiment_name}_lr_{learning_rate}_{timestamp}_{loss}_beta_{beta}_LD_{latent_dims}"

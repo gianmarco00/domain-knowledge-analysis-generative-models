@@ -90,9 +90,9 @@ class Trainer:
                 total_loss += loss_value.item() * len(x)
                 total_samples += len(x)
             
-            if callable(getattr(self.loss, "components", None)):
-                for name, value in self.loss.components().items():
-                    total_loss_components[name] += torch.sum(value).item()
+                if callable(getattr(self.loss, "components", None)):
+                    for name, value in self.loss.components().items():
+                        total_loss_components[name] += torch.sum(value).item()
 
         mean_loss = total_loss / total_samples
         mean_loss_components = {name: value / total_samples for name, value in total_loss_components.items()}
