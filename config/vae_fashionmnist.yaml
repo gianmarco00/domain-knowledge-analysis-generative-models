@@ -1,12 +1,12 @@
 experiment:
-  name: vae_fashionmnist
+  name: vae_mnist
 
 paths:
   dataset_dir: datasets
   runs_dir: runs
 
 dataset:
-  name: fashion_mnist
+  name: fashionmnist
   train: true
   train_split: 0.8
   shape: [1, 28, 28]
@@ -18,26 +18,46 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 100
+  epochs: 360
   learning_rate: 0.001
   start_weights: random
+
+loss:
+  name: vae_loss
+  log_prob_function: bernoulli
+  beta: 1.7
 
 model:
   name: vae
 
   encoder:
-    latent_dim: 32
+    latent_dim: 16
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
     paddings: [1, 1, 1, 1]
 
+  decoder:
+    symmetrical: true
+
 optimizer:
   name: adam
 
+lr_scheduler:
+  name: reduce_lr_on_plateau
+  mode: min
+  threshold: 0.5
+  threshold_mode: abs
+  min_lr: 0.0001
+  factor: 0.5
+  patience: 30
+  cooldown: 5
+  start_epoch: 250
+
+
 scoring:
-  pretrained_model: runs/vae_fashionmnist_lr_0.001_07-01_16-48-19/checkpoints/last.pt
-  out_distribution_datasets: [mnist, organamnist, kmnist]
+  pretrained_model: null
+  out_distribution_datasets: [fashion_mnist, organamnist, kmnist]
 
   dataloader:
     batch_size: 128
@@ -51,8 +71,9 @@ scoring:
     gradnorm:
       enabled: false
     latent_encoding:
-      enabled: false
+      enabled: true
     hole_mass:
       enabled: true
+
 
 seed: 42

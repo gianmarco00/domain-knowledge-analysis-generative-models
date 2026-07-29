@@ -3,10 +3,10 @@ from pathlib import Path
 from domain_knowledge_analysis.experiments import Experiment
 
 experiments_yamls = {
-    "vae_mnist.yaml", 
-    #"vae_fashionmnist.yaml", 
-    #"vae_kmnist.yaml", 
-    #"vae_organamnist.yaml"
+    #"vae_mnist.yaml", 
+    "vae_fashionmnist.yaml", 
+    "vae_kmnist.yaml", 
+    "vae_organamnist.yaml"
 }
 
 DEFAULT_CONFIG_PATHS = {Path(__file__).resolve().parents[1] / "config" / experiment_yaml for experiment_yaml in experiments_yamls}
