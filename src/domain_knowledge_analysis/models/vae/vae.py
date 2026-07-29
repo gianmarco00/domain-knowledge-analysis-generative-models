@@ -4,11 +4,12 @@ from torch.distributions import ContinuousBernoulli
 
 from .encoder import Encoder
 from .decoder import Decoder
+from .asymmetric_decoder import AsymmetricDecoder
 
 from domain_knowledge_analysis.math.gaussian import sample_gaussian
 
 class Vae(nn.Module):
-    def __init__(self, image_shape, encoder_params, decoder_distribution_name, decoder_params=None):
+    def __init__(self, image_shape, encoder_params, decoder_distribution_name, symmetric_decoder=True, decoder_params=None):
         super(Vae, self).__init__()
 
         self.image_shape = image_shape
@@ -20,7 +21,7 @@ class Vae(nn.Module):
         if decoder_params is None:
             decoder_params = self.derive_decoder_params_from_encoder(self.encoder, encoder_params) 
 
-        self.decoder = Decoder(decoder_params)
+        self.decoder = Decoder(decoder_params) if symmetric_decoder else AsymmetricDecoder(decoder_params)
 
     def forward(self, x):
         mean, log_variance = self.encoder(x)
