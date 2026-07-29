@@ -18,20 +18,20 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 150
+  epochs: 360
   learning_rate: 0.001
   start_weights: random
 
 loss:
   name: vae_loss
   log_prob_function: bernoulli
-  beta: 1
+  beta: 1.7
 
 model:
   name: vae
 
   encoder:
-    latent_dim: 8
+    latent_dim: 16
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
@@ -50,9 +50,9 @@ lr_scheduler:
   threshold_mode: abs
   min_lr: 0.0001
   factor: 0.5
-  patience: 15
+  patience: 30
   cooldown: 5
-  start_epoch: 50
+  start_epoch: 250
 
 
 scoring:

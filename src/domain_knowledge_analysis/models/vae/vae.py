@@ -21,7 +21,9 @@ class Vae(nn.Module):
         if decoder_params is None:
             decoder_params = self.derive_decoder_params_from_encoder(self.encoder, encoder_params) 
 
-        self.decoder = Decoder(decoder_params) if symmetric_decoder else AsymmetricDecoder(decoder_params)
+        self.decoder = Decoder(decoder_params) if symmetric_decoder else AsymmetricDecoder(decoder_params["latent_dim"])
+
+        print("symmetric: f{symmetric_decoder}")
 
     def forward(self, x):
         mean, log_variance = self.encoder(x)
