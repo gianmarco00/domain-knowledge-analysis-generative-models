@@ -69,7 +69,8 @@ def create_model(config):
     if model_name == "vae":
         encoder_params = config["model"]["encoder"]
         decoder_distribution_name = config["loss"]["log_prob_function"].lower()
-        return Vae(image_shape=image_shape, encoder_params=encoder_params, decoder_distribution_name=decoder_distribution_name)
+        symmetric_decoder = config["model"]["decoder"]["symmetrical"]
+        return Vae(image_shape=image_shape, encoder_params=encoder_params, decoder_distribution_name=decoder_distribution_name, symmetric_decoder=symmetric_decoder)
 
     raise ValueError(f"Unsupported model: {model_name}")
 
