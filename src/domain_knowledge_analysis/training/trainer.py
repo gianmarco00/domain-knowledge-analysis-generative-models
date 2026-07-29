@@ -127,6 +127,9 @@ class Trainer:
                     self.best_validation_loss = validation_loss
                     self.checkpoint_manager.save_best(self.model, self.optimizer, self.lr_scheduler, epoch+1, self.history, validation_loss)
 
+            if epoch == 250:
+                self.checkpoint_manager.save_with_name(self.model, self.optimizer, self.lr_scheduler, epoch+1, self.history, validation_loss, "before_lr.pt")
+
             if self.logger is not None:
 
                 self.logger.log_scalar("Loss/train", train_loss, epoch+1)

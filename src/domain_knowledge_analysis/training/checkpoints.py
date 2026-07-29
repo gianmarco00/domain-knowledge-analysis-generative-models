@@ -33,6 +33,9 @@ class CheckpointManager():
     def save_best(self, model, optimizer, lr_scheduler, epoch, history, validation_loss):
         self.save_checkpoint(model, optimizer, lr_scheduler, epoch, history, validation_loss, filename="best.pt")
 
+    def save_with_name(self, model, optimizer, lr_scheduler, epoch, history, validation_loss, filename):
+        self.save_checkpoint(model, optimizer, lr_scheduler, epoch, history, validation_loss, filename=filename)
+
 
     def load_model(self, model, checkpoint_path, device, optimizer=None, lr_scheduler=None):
         checkpoint = torch.load(checkpoint_path, map_location=device)

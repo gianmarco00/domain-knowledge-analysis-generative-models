@@ -38,7 +38,7 @@ model:
     paddings: [1, 1, 1, 1]
 
   decoder:
-    symmetrical: false
+    symmetrical: true
 
 optimizer:
   name: adam
