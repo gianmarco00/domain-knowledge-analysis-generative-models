@@ -118,7 +118,7 @@ def test_lora_convtranspose2d_merge_preserves_output():
 
 @pytest.fixture
 def config():
-    return {"lora": {"layers_to_inject": {"encoder": ["fc", "conv"], "decoder": ["fc", "convtranspose"]}}}
+    return {"lora": {"layers_to_inject": {"encoder": ["fc", "conv"], "decoder": ["fc", "convtranspose"]}, "rank": 2, "alpha": 4}}
 
 
 def test_inject_replaces_only_selected_layers(config):
@@ -134,8 +134,8 @@ def test_inject_replaces_only_selected_layers(config):
     original_decoder_conv_transpose_0 = model.decoder.conv_transpose[0]
     original_decoder_conv_transpose_2 = model.decoder.conv_transpose[2]
 
-    injector = LoRAManager(model=model, rank=2, alpha=4, config=config)
-    injector.inject()
+    injector = LoRAManager(model=model, config=config)
+    injector.inject_adapters()
 
     assert isinstance(model.encoder.conv[0], LoRAConv2d)
     assert isinstance(model.encoder.conv[2], LoRAConv2d)
@@ -167,8 +167,8 @@ def test_injection_preserves_initial_model_output(config):
     with torch.no_grad():
         output_before_injection = model(x)
 
-    injector = LoRAManager(model=model, rank=2, alpha=4, config=config)
-    injector.inject()
+    injector = LoRAManager(model=model, config=config)
+    injector.inject_adapters()
     model.eval()
 
     with torch.no_grad():
@@ -179,8 +179,8 @@ def test_injection_preserves_initial_model_output(config):
 
 def test_lora_parameters_are_registered_in_model(config):
     model = TinyVAE()
-    injector = LoRAManager(model=model, rank=2, alpha=4, config=config)
-    injector.inject()
+    injector = LoRAManager(model=model,   config=config)
+    injector.inject_adapters()
 
     parameter_names = set(dict(model.named_parameters()))
 
@@ -201,16 +201,16 @@ def test_lora_parameters_are_registered_in_model(config):
 
 
 def test_injecting_twice_raises_error(config):
-    injector = LoRAManager(model=TinyVAE(), rank=2, alpha=4, config=config)
-    injector.inject()
+    injector = LoRAManager(model=TinyVAE(),   config=config)
+    injector.inject_adapters()
 
     with pytest.raises(RuntimeError, match="LoRA has already been injected"):
-        injector.inject()
+        injector.inject_adapters()
 
 
 @pytest.mark.parametrize("layer, expected_type", [(nn.Linear(4, 2), LoRALinear), (nn.Conv2d(1, 2, kernel_size=3), LoRAConv2d), (nn.ConvTranspose2d(2, 1, kernel_size=3), LoRAConvTranspose2d)])
 def test_create_lora_layer_returns_correct_wrapper(config, layer, expected_type):
-    injector = LoRAManager(model=TinyVAE(), rank=2, alpha=4, config=config)
+    injector = LoRAManager(model=TinyVAE(),   config=config)
     lora_layer = injector.create_lora_layer(layer)
 
     assert isinstance(lora_layer, expected_type)
@@ -218,7 +218,7 @@ def test_create_lora_layer_returns_correct_wrapper(config, layer, expected_type)
 
 
 def test_create_lora_layer_rejects_unsupported_layer(config):
-    injector = LoRAManager(model=TinyVAE(), rank=2, alpha=4, config=config)
+    injector = LoRAManager(model=TinyVAE(),   config=config)
 
     with pytest.raises(TypeError, match="Unsupported layer type"):
         injector.create_lora_layer(nn.ReLU())
@@ -228,8 +228,8 @@ def test_deepcopy_keeps_original_model_unchanged(config):
     original_model = TinyVAE()
     adapted_model = copy.deepcopy(original_model)
 
-    injector = LoRAManager(model=adapted_model, rank=2, alpha=4, config=config)
-    injector.inject()
+    injector = LoRAManager(model=adapted_model,   config=config)
+    injector.inject_adapters()
 
     assert isinstance(original_model.encoder.conv[0], nn.Conv2d)
     assert isinstance(original_model.encoder.conv[2], nn.Conv2d)
@@ -249,7 +249,7 @@ def test_deepcopy_keeps_original_model_unchanged(config):
 
 @pytest.fixture
 def vae_config():
-    return {"image_shape": [1, 28, 28], "encoder_params": {"latent_dim": 15, "out_channels": [32, 64, 128, 128], "kernels": [3, 3, 3, 3], "strides": [2, 2, 2, 1], "paddings": [1, 1, 1, 1]}, "decoder_distribution_name": "bernoulli", "symmetric_decoder": True, "lora": {"layers_to_inject": {"encoder": ["fc", "conv"], "decoder": ["fc", "convtranspose"]}}}
+    return {"image_shape": [1, 28, 28], "encoder_params": {"latent_dim": 15, "out_channels": [32, 64, 128, 128], "kernels": [3, 3, 3, 3], "strides": [2, 2, 2, 1], "paddings": [1, 1, 1, 1]}, "decoder_distribution_name": "bernoulli", "symmetric_decoder": True, "lora": {"layers_to_inject": {"encoder": ["fc", "conv"], "decoder": ["fc", "convtranspose"]}, "rank": 2, "alpha": 4}}
 
 
 def test_lora_injection_on_vae(vae_config):
@@ -266,8 +266,8 @@ def test_lora_injection_on_vae(vae_config):
 
     output_before_injection = model.reconstruct_images(x)
 
-    injector = LoRAManager(model=model, rank=2, alpha=4, config=vae_config)
-    injector.inject()
+    injector = LoRAManager(model=model, config=vae_config)
+    injector.inject_adapters()
     model.eval()
 
     output_after_injection = model.reconstruct_images(x)

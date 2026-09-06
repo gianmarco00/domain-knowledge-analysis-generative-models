@@ -1,6 +1,8 @@
 experiment:
   name: vae_mnist
 
+pretrained_model: null
+
 paths:
   dataset_dir: datasets
   runs_dir: runs
@@ -56,7 +58,6 @@ lr_scheduler:
 
 
 scoring:
-  pretrained_model: null
   out_distribution_datasets: [fashion_mnist, organamnist, kmnist]
 
   dataloader:
@@ -74,6 +75,14 @@ scoring:
       enabled: true
     hole_mass:
       enabled: true
+
+lora:
+  layers_to_inject:
+    encoder: [fc, conv]
+    decoder: [fc, conv, convtranspose]
+  rank: 2
+  alpha: 4
+  finetuning_dataset: rotated_mnist
 
 
 seed: 42

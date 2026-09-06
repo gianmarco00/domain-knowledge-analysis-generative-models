@@ -1,6 +1,7 @@
 from domain_knowledge_analysis.training import Trainer, TensorBoardLogger, CheckpointManager
 from domain_knowledge_analysis.scoring import Scorer
 from domain_knowledge_analysis.plotting import Plotter
+from domain_knowledge_analysis.adapters import LoRAManager
 
 from domain_knowledge_analysis import utils
 
@@ -13,8 +14,8 @@ class Experiment():
         self.config = utils.load_config(config_path)
         utils.set_seed(self.config["seed"])
 
-        if self.config["scoring"]["pretrained_model"]:
-            self.pretrained_model_path = Path(utils.get_repo_root() / self.config["scoring"]["pretrained_model"])
+        if self.config["pretrained_model"]:
+            self.pretrained_model_path = Path(utils.get_repo_root() / self.config["pretrained_model"])
             self.log_dir = self.pretrained_model_path.parent.parent
         else:
             self.pretrained_model_path = None
@@ -31,7 +32,7 @@ class Experiment():
         
     def train(self):
 
-        optimizer = utils.create_optimizer(self.config, self.model)
+        optimizer = utils.create_optimizer(self.config, self.model.parameters())
 
         lr_scheduler, lr_scheduler_start_epoch = utils.create_lr_scheduler(self.config, optimizer)
 
@@ -105,6 +106,21 @@ class Experiment():
         )
 
         return results
+    
+    def adapt(self):
+
+        if self.config["lora"] is None or "adapt" not in self.config["experiment_name"]:
+            raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
+        
+        if self.pretrained_model_path:
+            self.model = self.checkpoint_manager.load_model(self.model, self.pretrained_model_path, self.device)
+
+        lora_manager = LoRAManager(self.model, self.config)
+        lora_manager.inject_adapters()
+
+        optimizer = utils.create_optimizer(self.config, lora_manager.trainable_parameters())
+
+
 
 
     @staticmethod

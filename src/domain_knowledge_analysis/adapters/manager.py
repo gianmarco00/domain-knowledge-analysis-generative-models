@@ -3,10 +3,10 @@ from .lora import LoRALinear, LoRAConv2d, LoRAConvTranspose2d
 from domain_knowledge_analysis.utils import select_layers
 
 class LoRAManager:
-    def __init__(self, model, rank, alpha, config):
+    def __init__(self, model, config):
         self.model = model
-        self.rank = rank
-        self.alpha = alpha
+        self.rank = config["lora"]["rank"]
+        self.alpha = config["lora"]["alpha"]
         self.config = config
         self.layers_to_inject = select_layers(self.model, self.config["lora"]["layers_to_inject"])
 
@@ -14,7 +14,7 @@ class LoRAManager:
         self.adapters_enabled = True
         self.lora_layers = {}
 
-    def inject(self):
+    def inject_adapters(self):
         if self.injected:
             raise RuntimeError("LoRA has already been injected into the model.")
 
