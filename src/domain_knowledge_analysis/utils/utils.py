@@ -35,6 +35,13 @@ def build_run_name(config):
         latent_dims = config["model"]["encoder"]["latent_dim"]
         beta = config["loss"]["beta"]
         loss = "CB" if config["loss"]["log_prob_function"] == "continuous_bernoulli" else "B"
+
+        if "adapt" in experiment_name:
+            rank = config["lora"]["rank"]
+            alpha = config["lora"]["alpha"]
+            finetuning_dataset = config["lora"]["finetuning_dataset"]
+            return f"{experiment_name}_finetuned_on_{finetuning_dataset}_rank_{rank}_alpha_{alpha}"
+        
         return f"{experiment_name}_lr_{learning_rate}_{timestamp}_{loss}_beta_{beta}_LD_{latent_dims}"
 
     return f"{experiment_name}_lr_{learning_rate}_{timestamp}"
@@ -78,12 +85,12 @@ def create_model(config):
     raise ValueError(f"Unsupported model: {model_name}")
 
 
-def create_optimizer(config, model):
+def create_optimizer(config, parameters):
     optimizer_name = config["optimizer"]["name"].lower()
     learning_rate = config["training"]["learning_rate"]
 
     if optimizer_name == "adam":
-        return torch.optim.Adam(model.parameters(), lr=learning_rate)
+        return torch.optim.Adam(parameters, lr=learning_rate)
 
     raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
@@ -108,9 +115,15 @@ def create_lr_scheduler(config, optimizer):
 
 
 def create_log_dir(config):
-    runs_dir = Path(config["paths"]["runs_dir"])
+    experiment_name = config["experiment"]["name"]
+    pretrained_model_path = Path(config.get("pretrained_model"))
+
+    runs_dir = config["paths"]["runs_dir"]
     repo_root = get_repo_root()
     runs_dir = repo_root / runs_dir
+
+    if "adapt" in experiment_name:
+        runs_dir = pretrained_model_path.parent.parent
 
     run_name = build_run_name(config)
     log_dir = runs_dir / run_name

@@ -109,7 +109,7 @@ class Experiment():
     
     def adapt(self):
 
-        if self.config["lora"] is None or "adapt" not in self.config["experiment_name"]:
+        if self.config["lora"] is None or "adapt" not in self.config["experiment"]["name"]:
             raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
         
         if self.pretrained_model_path:
