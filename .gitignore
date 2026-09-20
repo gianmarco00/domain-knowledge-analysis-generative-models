@@ -12,4 +12,4 @@ dist/
 *.npz
 *.DS_Store
 *.bash_history
-.datasets/transformed/
+datasets/transformed/
