@@ -20,7 +20,7 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 100
+  epochs: 160
   learning_rate: 0.001
 
 loss:
@@ -79,7 +79,7 @@ lora:
   layers_to_inject:
     encoder: [fc, conv]
     decoder: [fc, conv, convtranspose]
-  rank: 2
+  rank: 8
   alpha: 4
   transformed_dataset:
     name: rotated_mnist
