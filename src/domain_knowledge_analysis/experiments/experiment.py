@@ -14,20 +14,20 @@ class Experiment():
         self.config = utils.load_config(config_path)
         utils.set_seed(self.config["seed"])
 
-        if self.config["pretrained_model"]:
-            self.pretrained_model_path = Path(utils.get_repo_root() / self.config["pretrained_model"])
-            self.log_dir = self.pretrained_model_path.parent.parent
-        else:
-            self.pretrained_model_path = None
-            self.log_dir = utils.create_log_dir(self.config)
-            self.logger = TensorBoardLogger(self.log_dir)
-
+        self.pretrained_model_path = Path(utils.get_repo_root() / self.config["pretrained_model"]) if self.config["pretrained_model"] else None
+        self.log_dir = utils.create_log_dir(self.config)
+        self.logger = TensorBoardLogger(self.log_dir) 
         self.checkpoint_manager = CheckpointManager(self.log_dir, self.config)
 
         self.device = utils.get_device()
         print(f"Using device: {self.device}")
 
         self.model = utils.create_model(self.config).to(self.device)
+
+        if self.pretrained_model_path:
+            self.model = self.checkpoint_manager.load_model(self.model, self.pretrained_model_path, self.device)
+        else:
+            self.model = self.train()
 
         
     def train(self):
@@ -55,7 +55,6 @@ class Experiment():
             device=self.device,
             checkpoint_manager=self.checkpoint_manager,
             logger=self.logger,
-            start_weights=self.config["training"]["start_weights"]
         )
 
         trainer.fit()
@@ -65,11 +64,8 @@ class Experiment():
     def score(self):
 
         if self.pretrained_model_path:
-            self.model = self.checkpoint_manager.load_model(self.model, self.pretrained_model_path, self.device)
             training_dataset_name = self.checkpoint_manager.training_dataset
-
         else:
-            self.model = self.train()
             training_dataset_name = self.config["dataset"]["name"]
 
         out_distribution_dataset_names = self.config["scoring"]["out_distribution_datasets"]
@@ -111,15 +107,44 @@ class Experiment():
 
         if self.config["lora"] is None or "adapt" not in self.config["experiment"]["name"]:
             raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
-        
-        if self.pretrained_model_path:
-            self.model = self.checkpoint_manager.load_model(self.model, self.pretrained_model_path, self.device)
 
         lora_manager = LoRAManager(self.model, self.config)
         lora_manager.inject_adapters()
 
+        self.source_config = self.checkpoint_manager.model_config
+        self.source_dataset_name = self.source_config["dataset"]["name"]
+
+        if self.source_dataset_name != self.config["dataset"]["name"]:
+            raise ValueError(f"The source dataset ({self.source_dataset_name}) differs from the expected source dataset ({self.config['dataset']['name']}).")
+
+        train_dataloader, validation_dataloader = utils.create_training_dataloaders(
+            config=self.config,
+            transformation_config=self.config["lora"]["transformed_dataset"],
+        )
+
         optimizer = utils.create_optimizer(self.config, lora_manager.trainable_parameters())
 
+        lr_scheduler, lr_scheduler_start_epoch = utils.create_lr_scheduler(self.config, optimizer)
+
+        loss = utils.create_loss(self.source_config)
+
+        self.print_tensorboard_instructions(self.log_dir)
+
+        trainer = Trainer(
+            model=self.model,
+            train_dataloader=train_dataloader,
+            validate_dataloader=validation_dataloader,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            lr_scheduler_start_epoch=lr_scheduler_start_epoch,
+            loss=loss,
+            epochs=self.config["training"]["epochs"],
+            device=self.device,
+            checkpoint_manager=self.checkpoint_manager,
+            logger=self.logger,
+        )
+
+        trainer.fit()
 
 
 

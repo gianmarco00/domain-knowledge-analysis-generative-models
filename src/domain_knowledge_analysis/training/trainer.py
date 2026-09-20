@@ -5,7 +5,7 @@ from collections import defaultdict
 from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, checkpoint_manager=None, logger=None, start_weights="random"):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, checkpoint_manager=None, logger=None):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
@@ -29,12 +29,6 @@ class Trainer:
         self.best_validation_loss = float("inf")
 
         self.model.to(self.device)
-
-        if start_weights != "random" and checkpoint_manager is None:
-            raise ValueError("Cannot load start_weights without a checkpoint_manager.")
-
-        if start_weights != "random":
-            self.model = checkpoint_manager.load_model(self.model, start_weights, self.device, self.optimizer)
 
 
         self.history = {

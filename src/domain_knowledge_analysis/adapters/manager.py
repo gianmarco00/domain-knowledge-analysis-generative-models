@@ -20,7 +20,7 @@ class LoRAManager:
 
         for name, layer in self.layers_to_inject.items():
             lora_layer = self.create_lora_layer(layer)
-            self.model.set_submodule(name, lora_layer, strict=True)
+            self.model.set_submodule(name, lora_layer)
             self.lora_layers[name] = lora_layer
 
         self.injected = True
@@ -31,8 +31,8 @@ class LoRAManager:
 
         trainable_params = []
         for layer in self.lora_layers.values():
-            trainable_params.extend(layer.lora_A)
-            trainable_params.extend(layer.lora_B)
+            trainable_params.append(layer.lora_A)
+            trainable_params.append(layer.lora_B)
 
         return trainable_params
 

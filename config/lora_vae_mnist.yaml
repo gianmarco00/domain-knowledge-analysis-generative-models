@@ -1,7 +1,7 @@
 experiment:
-  name: vae_mnist
+  name: adapt_vae_mnist
 
-pretrained_model: null
+pretrained_model: runs/vae_mnist_lr_0.001_29_jul_1606_B_beta_1.7_LD_16/checkpoints/best.pt
 
 paths:
   dataset_dir: datasets
@@ -20,7 +20,7 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 360
+  epochs: 100
   learning_rate: 0.001
 
 loss:
@@ -32,7 +32,7 @@ model:
   name: vae
 
   encoder:
-    latent_dim: 15
+    latent_dim: 16
     out_channels: [32, 64, 128, 128]
     kernels: [3, 3, 3, 3]
     strides: [2, 2, 2, 1]
@@ -51,9 +51,9 @@ lr_scheduler:
   threshold_mode: abs
   min_lr: 0.0001
   factor: 0.5
-  patience: 30
+  patience: 15
   cooldown: 5
-  start_epoch: 250
+  start_epoch: 50
 
 
 scoring:
@@ -71,9 +71,9 @@ scoring:
     gradnorm:
       enabled: false
     latent_encoding:
-      enabled: true
+      enabled: false
     hole_mass:
-      enabled: true
+      enabled: false
 
 lora:
   layers_to_inject:
@@ -81,10 +81,13 @@ lora:
     decoder: [fc, conv, convtranspose]
   rank: 2
   alpha: 4
-  finetuning_dataset: rotated_mnist
-  dataset_transformation:
+  transformed_dataset:
+    name: rotated_mnist
     type: rotation
     intensity: 45.0
+    train: true
+    train_split: 0.8
+    shape: [1, 28, 28]
 
 
 seed: 42

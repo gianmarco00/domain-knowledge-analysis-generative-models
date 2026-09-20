@@ -39,8 +39,8 @@ def build_run_name(config):
         if "adapt" in experiment_name:
             rank = config["lora"]["rank"]
             alpha = config["lora"]["alpha"]
-            finetuning_dataset = config["lora"]["finetuning_dataset"]
-            return f"{experiment_name}_finetuned_on_{finetuning_dataset}_rank_{rank}_alpha_{alpha}"
+            finetuning_dataset = config["lora"]["transformed_dataset"]["name"]
+            return f"{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_rank_{rank}_alpha_{alpha}"
         
         return f"{experiment_name}_lr_{learning_rate}_{timestamp}_{loss}_beta_{beta}_LD_{latent_dims}"
 
@@ -115,14 +115,22 @@ def create_lr_scheduler(config, optimizer):
 
 
 def create_log_dir(config):
+    
+    repo_root = get_repo_root()
     experiment_name = config["experiment"]["name"]
-    pretrained_model_path = Path(config.get("pretrained_model"))
+    pretrained_model_path = repo_root / Path(config["pretrained_model"]) if config["pretrained_model"] else None
+
+    if pretrained_model_path is not None and config["lora"] is None:
+        return pretrained_model_path.parent.parent
 
     runs_dir = config["paths"]["runs_dir"]
-    repo_root = get_repo_root()
     runs_dir = repo_root / runs_dir
 
-    if "adapt" in experiment_name:
+    if config["lora"] is not None:
+        
+        if "adapt" not in experiment_name:
+            raise ValueError("LoRA configuration is present but the experiment name does not contain 'adapt'.")
+        
         runs_dir = pretrained_model_path.parent.parent
 
     run_name = build_run_name(config)

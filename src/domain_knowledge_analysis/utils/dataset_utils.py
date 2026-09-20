@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, random_split, ConcatDataset, Dataset
+from torch.utils.data import DataLoader, random_split, ConcatDataset, Dataset, TensorDataset
 from torchvision import datasets, transforms
+from torchvision.transforms import InterpolationMode
+from torchvision.transforms import functional as TF
 
 import medmnist
 from medmnist import INFO
@@ -32,6 +34,36 @@ MEDMNIST_DATASETS = {
     "organamnist",
     "pneumoniamnist",
 }
+
+
+TRANSFORMED_DATASET_CACHE_VERSION = 1
+
+
+class FixedRotation:
+    """Rotate a tensor image by a fixed angle without changing its shape."""
+
+    def __init__(self, degrees):
+        self.degrees = float(degrees)
+
+    def __call__(self, image):
+        return TF.rotate(
+            image,
+            angle=self.degrees,
+            interpolation=InterpolationMode.BILINEAR,
+            expand=False,
+            fill=0,
+        )
+
+
+def create_dataset_transformation(transformation_type, intensity):
+    transformation_type = transformation_type.lower()
+
+    if transformation_type == "rotation":
+        return FixedRotation(degrees=intensity)
+
+    raise ValueError(
+        f"Unsupported dataset transformation: {transformation_type}"
+    )
     
 
 def create_dataset(config, dataset_name, train):
@@ -111,14 +143,21 @@ def create_train_validation_datasets(config, dataset_name):
     return train_dataset, validation_dataset
 
 
-def create_training_dataloaders(config):
+def create_training_dataloaders(config, transformation_config=None):
 
     dataset_name = config["dataset"]["name"].lower()
 
-    train_dataset, validation_dataset = create_train_validation_datasets(
-        config=config,
-        dataset_name=dataset_name,
-    )
+    if transformation_config is None:
+        train_dataset, validation_dataset = create_train_validation_datasets(
+            config=config,
+            dataset_name=dataset_name,
+        )
+    else:
+        train_dataset, validation_dataset = create_transformed_train_validation_datasets(
+            config=config,
+            dataset_name=dataset_name,
+            transformation_config=transformation_config,
+        )
 
     dataloader_config = config["dataloader"]
 
@@ -137,6 +176,142 @@ def create_training_dataloaders(config):
     )
 
     return train_dataloader, validation_dataloader
+
+
+def materialize_transformed_dataset(dataset, transformation):
+    images = []
+    labels = []
+
+    with torch.no_grad():
+        for image, label in dataset:
+            transformed_image = transformation(image)
+            images.append(transformed_image.detach().cpu())
+            labels.append(torch.as_tensor(label).detach().cpu())
+
+    if not images:
+        raise ValueError("Cannot materialize an empty dataset.")
+
+    return TensorDataset(
+        torch.stack(images),
+        torch.stack(labels),
+    )
+
+
+def create_transformed_train_validation_datasets(
+    config,
+    dataset_name,
+    transformation_config,
+):
+    dataset_name = dataset_name.lower()
+    dataset_name = DATASET_ALIASES.get(
+        dataset_name,
+        dataset_name,
+    )
+
+    transformation_type = transformation_config["type"].lower()
+    intensity = float(transformation_config["intensity"])
+
+    dataset_dir = get_repo_root() / Path(config["paths"]["dataset_dir"])
+    train_split = float(config["dataset"]["train_split"])
+    seed = int(config["seed"])
+
+    cache_dir = (
+        dataset_dir
+        / "transformed"
+        / dataset_name
+        / f"{transformation_type}_intensity_{intensity:g}"
+        / f"version_{TRANSFORMED_DATASET_CACHE_VERSION}"
+        / f"seed_{seed}_split_{train_split:g}"
+    )
+
+    train_path = cache_dir / "train.pt"
+    validation_path = cache_dir / "validation.pt"
+
+    metadata = {
+        "cache_version": TRANSFORMED_DATASET_CACHE_VERSION,
+        "dataset_name": dataset_name,
+        "transformation_type": transformation_type,
+        "intensity": intensity,
+        "interpolation": "bilinear",
+        "fill": 0,
+        "expand": False,
+        "seed": seed,
+        "train_split": train_split,
+    }
+
+    train_metadata = {**metadata, "split": "train"}
+    validation_metadata = {**metadata, "split": "validation"}
+
+    if train_path.exists() and validation_path.exists():
+        return (
+            load_tensor_dataset(train_path, train_metadata),
+            load_tensor_dataset(validation_path, validation_metadata),
+        )
+
+    train_dataset, validation_dataset = create_train_validation_datasets(
+        config=config,
+        dataset_name=dataset_name,
+    )
+
+    transformation = create_dataset_transformation(
+        transformation_type=transformation_type,
+        intensity=intensity,
+    )
+
+    transformed_train_dataset = materialize_transformed_dataset(
+        dataset=train_dataset,
+        transformation=transformation,
+    )
+    transformed_validation_dataset = materialize_transformed_dataset(
+        dataset=validation_dataset,
+        transformation=transformation,
+    )
+
+    save_tensor_dataset(
+        dataset=transformed_train_dataset,
+        path=train_path,
+        metadata=train_metadata,
+    )
+    save_tensor_dataset(
+        dataset=transformed_validation_dataset,
+        path=validation_path,
+        metadata=validation_metadata,
+    )
+
+    return transformed_train_dataset, transformed_validation_dataset
+
+
+def save_tensor_dataset(dataset, path, metadata):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+
+    torch.save(
+        {
+            "images": dataset.tensors[0],
+            "labels": dataset.tensors[1],
+            "metadata": metadata,
+        },
+        temporary_path,
+    )
+    temporary_path.replace(path)
+
+
+def load_tensor_dataset(path, expected_metadata):
+    cached_dataset = torch.load(
+        path,
+        map_location="cpu",
+        weights_only=True,
+    )
+
+    if cached_dataset["metadata"] != expected_metadata:
+        raise ValueError(
+            f"Cached transformed dataset metadata does not match: {path}"
+        )
+
+    return TensorDataset(
+        cached_dataset["images"],
+        cached_dataset["labels"],
+    )
 
 
 def create_scoring_dataloaders(
