@@ -148,12 +148,17 @@ class Experiment():
 
     def score_adaptation(self):
 
-
         if self.config["lora"] is None or "adapt" not in self.config["experiment"]["name"]:
             raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
 
         lora_manager = LoRAManager(self.model, self.config)
         lora_manager.inject_adapters()
+
+        if self.config["lora"]["pretrained_model"]:
+            self.lora_pretrained_model_path = Path(utils.get_repo_root() / self.config["lora"]["pretrained_model"])
+            self.model = self.checkpoint_manager.load_model(self.model, self.lora_pretrained_model_path, self.device)
+        else:
+            self.adapt()
 
         self.source_config = self.checkpoint_manager.model_config
         self.source_dataset_name = self.source_config["dataset"]["name"]

@@ -49,6 +49,20 @@ class CheckpointManager():
                     f"Checkpoint model config:\n{self.model_config['model']}\n"
                     f"Current model config:\n{self.config['model']}"
                 )
+            
+            if self.model_config["lora"]["rank"] != self.config["lora"]["rank"]:
+                raise ValueError(
+                    "Pretrained model LoRA rank differs from current LoRA rank.\n"
+                    f"Checkpoint LoRA config:\n{self.model_config['lora']}\n"
+                    f"Current LoRA config:\n{self.config['lora']}"
+                )
+            
+            if self.model_config["lora"]["layers_to_inject"] != self.config["lora"]["layers_to_inject"]:
+                raise ValueError(
+                    "Pretrained model LoRA layers to inject differs from current LoRA layers to inject.\n"
+                    f"Checkpoint LoRA config:\n{self.model_config['lora']}\n"
+                    f"Current LoRA config:\n{self.config['lora']}"
+                )
 
         self.training_dataset = self.model_config["dataset"]["name"]
 
