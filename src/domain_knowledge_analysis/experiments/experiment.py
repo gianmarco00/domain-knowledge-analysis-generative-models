@@ -1,5 +1,5 @@
 from domain_knowledge_analysis.training import Trainer, TensorBoardLogger, CheckpointManager
-from domain_knowledge_analysis.scoring import DomainScorer
+from domain_knowledge_analysis.scoring import DomainScorer, AdaptationScorer
 from domain_knowledge_analysis.plotting import Plotter
 from domain_knowledge_analysis.adapters import LoRAManager
 
@@ -161,7 +161,18 @@ class Experiment():
         if self.source_dataset_name != self.config["dataset"]["name"]:
             raise ValueError(f"The source dataset ({self.source_dataset_name}) differs from the expected source dataset ({self.config['dataset']['name']}).")
         
-        
+        target_dataloader = utils.create_testing_dataloaders(
+            config=self.config,
+            transformation_config=self.config["lora"]["transformed_dataset"],
+        )
+        source_dataloader = utils.create_testing_dataloaders(
+            config=self.source_config,
+            transformation_config=None,
+        )
+
+        scorer = AdaptationScorer(self.model, lora_manager, target_dataloader, source_dataloader, self.config, self.device)
+
+        scores = scorer.score()
 
         
 

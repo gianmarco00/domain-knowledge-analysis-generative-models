@@ -153,7 +153,7 @@ def create_training_dataloaders(config, transformation_config=None):
             dataset_name=dataset_name,
         )
     else:
-        train_dataset, validation_dataset = create_transformed_train_validation_datasets(
+        train_dataset, validation_dataset = create_transformed_datasets(
             config=config,
             dataset_name=dataset_name,
             transformation_config=transformation_config,
@@ -178,6 +178,32 @@ def create_training_dataloaders(config, transformation_config=None):
     return train_dataloader, validation_dataloader
 
 
+def create_testing_dataloaders(config, transformation_config=None):
+    dataset_name = config["dataset"]["name"].lower()
+
+    if transformation_config is None:
+        test_dataset = create_dataset(
+            config=config,
+            dataset_name=dataset_name,
+            train=False,
+        )
+    else:
+        test_dataset = create_transformed_datasets(
+            config=config,
+            dataset_name=dataset_name,
+            transformation_config=transformation_config,
+            split="test",
+        )
+
+    dataloader_config = config["scoring"]["dataloader"]
+    return DataLoader(
+        test_dataset,
+        batch_size=dataloader_config["batch_size"],
+        shuffle=False,
+        num_workers=dataloader_config["num_workers"],
+    )
+
+
 def materialize_transformed_dataset(dataset, transformation):
     images = []
     labels = []
@@ -197,10 +223,11 @@ def materialize_transformed_dataset(dataset, transformation):
     )
 
 
-def create_transformed_train_validation_datasets(
+def create_transformed_datasets(
     config,
     dataset_name,
     transformation_config,
+    split="train_validation",
 ):
     dataset_name = dataset_name.lower()
     dataset_name = DATASET_ALIASES.get(
@@ -226,6 +253,7 @@ def create_transformed_train_validation_datasets(
 
     train_path = cache_dir / "train.pt"
     validation_path = cache_dir / "validation.pt"
+    test_path = cache_dir / "test.pt"
 
     metadata = {
         "cache_version": TRANSFORMED_DATASET_CACHE_VERSION,
@@ -241,6 +269,34 @@ def create_transformed_train_validation_datasets(
 
     train_metadata = {**metadata, "split": "train"}
     validation_metadata = {**metadata, "split": "validation"}
+    test_metadata = {**metadata, "split": "test"}
+    transformation = create_dataset_transformation(
+        transformation_type=transformation_type,
+        intensity=intensity,
+    )
+
+    if split == "test":
+        if test_path.exists():
+            return load_tensor_dataset(test_path, test_metadata)
+
+        test_dataset = create_dataset(
+            config=config,
+            dataset_name=dataset_name,
+            train=False,
+        )
+        transformed_test_dataset = materialize_transformed_dataset(
+            dataset=test_dataset,
+            transformation=transformation,
+        )
+        save_tensor_dataset(
+            dataset=transformed_test_dataset,
+            path=test_path,
+            metadata=test_metadata,
+        )
+        return transformed_test_dataset
+
+    if split != "train_validation":
+        raise ValueError(f"Unsupported transformed dataset split: {split}")
 
     if train_path.exists() and validation_path.exists():
         return (
@@ -251,11 +307,6 @@ def create_transformed_train_validation_datasets(
     train_dataset, validation_dataset = create_train_validation_datasets(
         config=config,
         dataset_name=dataset_name,
-    )
-
-    transformation = create_dataset_transformation(
-        transformation_type=transformation_type,
-        intensity=intensity,
     )
 
     transformed_train_dataset = materialize_transformed_dataset(
@@ -279,6 +330,10 @@ def create_transformed_train_validation_datasets(
     )
 
     return transformed_train_dataset, transformed_validation_dataset
+
+
+# Preserve direct callers of the original train/validation helper.
+create_transformed_train_validation_datasets = create_transformed_datasets
 
 
 def save_tensor_dataset(dataset, path, metadata):

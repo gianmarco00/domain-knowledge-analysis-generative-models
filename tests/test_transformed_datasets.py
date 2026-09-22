@@ -23,6 +23,12 @@ def config(tmp_path):
             "shuffle_validation": False,
             "num_workers": 0,
         },
+        "scoring": {
+            "dataloader": {
+                "batch_size": 3,
+                "num_workers": 0,
+            },
+        },
         "seed": 42,
     }
 
@@ -98,14 +104,14 @@ def test_transformed_datasets_are_saved_and_reused(
     )
 
     first_train, first_validation = (
-        dataset_utils.create_transformed_train_validation_datasets(
+        dataset_utils.create_transformed_datasets(
             config=config,
             dataset_name="mnist",
             transformation_config=transformation_config,
         )
     )
     second_train, second_validation = (
-        dataset_utils.create_transformed_train_validation_datasets(
+        dataset_utils.create_transformed_datasets(
             config=config,
             dataset_name="mnist",
             transformation_config=transformation_config,
@@ -141,7 +147,7 @@ def test_training_dataloaders_use_cached_transformed_datasets(
 
     monkeypatch.setattr(
         dataset_utils,
-        "create_transformed_train_validation_datasets",
+        "create_transformed_datasets",
         create_transformed_splits,
     )
 
@@ -155,6 +161,80 @@ def test_training_dataloaders_use_cached_transformed_datasets(
     assert len(train_dataloader.dataset) == 6
     assert len(validation_dataloader.dataset) == 2
     assert next(iter(train_dataloader))[0].shape == (2, 1, 5, 5)
+
+
+def test_testing_dataloader_uses_original_test_split_without_transformation(
+    monkeypatch,
+    config,
+):
+    class FakeMNIST:
+        def __init__(self, root, train, download, transform):
+            self.train = train
+            self.images = torch.full((8, 1, 5, 5), 1.0 if train else 0.25)
+            self.labels = torch.arange(8)
+
+        def __len__(self):
+            return len(self.images)
+
+        def __getitem__(self, index):
+            return self.images[index], self.labels[index]
+
+    monkeypatch.setitem(dataset_utils.TORCHVISION_DATASETS, "mnist", FakeMNIST)
+    config["dataset"]["shape"] = [1, 5, 5]
+    config["model"] = {"name": "vae"}
+    config["loss"] = {"log_prob_function": "bernoulli"}
+
+    test_dataloader = dataset_utils.create_testing_dataloaders(config=config)
+
+    assert test_dataloader.dataset.train is False
+    assert test_dataloader.batch_size == 3
+    images, labels = next(iter(test_dataloader))
+    assert torch.equal(images, torch.full((3, 1, 5, 5), 0.25))
+    assert torch.equal(labels, torch.arange(3))
+
+
+def test_testing_dataloader_transforms_test_split_and_reuses_cache(
+    monkeypatch,
+    config,
+    transformation_config,
+):
+    test_dataset = create_small_dataset()
+    calls = []
+
+    def create_source_dataset(config, dataset_name, train):
+        calls.append((dataset_name, train))
+        return test_dataset
+
+    monkeypatch.setattr(dataset_utils, "create_dataset", create_source_dataset)
+
+    first_dataloader = dataset_utils.create_testing_dataloaders(
+        config=config,
+        transformation_config=transformation_config,
+    )
+    second_dataloader = dataset_utils.create_testing_dataloaders(
+        config=config,
+        transformation_config=transformation_config,
+    )
+
+    first_images, first_labels = first_dataloader.dataset.tensors
+    second_images, second_labels = second_dataloader.dataset.tensors
+    expected_images = torch.stack(
+        [dataset_utils.FixedRotation(45.0)(image) for image in test_dataset.tensors[0]]
+    )
+    cache_files = sorted(
+        Path(config["paths"]["dataset_dir"])
+        .joinpath("transformed")
+        .rglob("*.pt")
+    )
+
+    assert calls == [("mnist", False)]
+    assert [path.name for path in cache_files] == ["test.pt"]
+    assert first_dataloader.batch_size == 3
+    assert torch.equal(first_images, expected_images)
+    assert not torch.equal(first_images, test_dataset.tensors[0])
+    assert torch.equal(first_labels, test_dataset.tensors[1])
+    assert torch.equal(second_images, first_images)
+    assert torch.equal(second_labels, first_labels)
 
 
 def test_training_dataloaders_without_transformation_remain_unchanged(
