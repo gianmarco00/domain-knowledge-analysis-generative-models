@@ -10,7 +10,7 @@ from domain_knowledge_analysis.scoring.signals import (
 )
 
 
-class Scorer:
+class DomainScorer:
     def __init__(
         self,
         model,

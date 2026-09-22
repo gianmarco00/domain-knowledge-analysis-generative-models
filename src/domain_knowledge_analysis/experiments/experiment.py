@@ -1,5 +1,5 @@
 from domain_knowledge_analysis.training import Trainer, TensorBoardLogger, CheckpointManager
-from domain_knowledge_analysis.scoring import Scorer
+from domain_knowledge_analysis.scoring import DomainScorer
 from domain_knowledge_analysis.plotting import Plotter
 from domain_knowledge_analysis.adapters import LoRAManager
 
@@ -61,7 +61,7 @@ class Experiment():
 
         return self.model
     
-    def score(self):
+    def score_domain_knowledge(self):
 
         if self.pretrained_model_path:
             training_dataset_name = self.checkpoint_manager.training_dataset
@@ -81,7 +81,7 @@ class Experiment():
             dataset_name=training_dataset_name
         )
 
-        scorer = Scorer(
+        scorer = DomainScorer(
             model=self.model,
             in_distribution_dataloader=in_distribution_dataloader,
             out_distribution_dataloaders=out_distribution_dataloaders,
@@ -145,6 +145,27 @@ class Experiment():
         )
 
         trainer.fit()
+
+    def score_adaptation(self):
+
+
+        if self.config["lora"] is None or "adapt" not in self.config["experiment"]["name"]:
+            raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
+
+        lora_manager = LoRAManager(self.model, self.config)
+        lora_manager.inject_adapters()
+
+        self.source_config = self.checkpoint_manager.model_config
+        self.source_dataset_name = self.source_config["dataset"]["name"]
+
+        if self.source_dataset_name != self.config["dataset"]["name"]:
+            raise ValueError(f"The source dataset ({self.source_dataset_name}) differs from the expected source dataset ({self.config['dataset']['name']}).")
+        
+        
+
+        
+
+
 
 
 
