@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import pytest
 import torch
 
@@ -33,10 +35,18 @@ def lora_config():
 
 
 @pytest.fixture
-def saved_lora_checkpoint(tmp_path):
+def saved_checkpoints(tmp_path):
     config = lora_config()
+    source_config = deepcopy(config)
+    source_config.pop("lora")  # Older source checkpoints do not have this key.
+
     torch.manual_seed(0)
-    adapted_model = utils.create_model(config)
+    source_model = utils.create_model(source_config)
+    source_checkpoint_manager = CheckpointManager(tmp_path / "source", source_config)
+    source_optimizer = torch.optim.Adam(source_model.parameters(), lr=0.001)
+    source_checkpoint_manager.save_last(source_model, source_optimizer, None, 1, {}, 0.5)
+
+    adapted_model = deepcopy(source_model)
     adapted_manager = LoRAManager(adapted_model, config)
     adapted_manager.inject_adapters()
 
@@ -46,27 +56,44 @@ def saved_lora_checkpoint(tmp_path):
             layer.lora_A.fill_(0.1)
             layer.lora_B.fill_(0.1)
 
-    checkpoint_manager = CheckpointManager(tmp_path, config)
-    optimizer = torch.optim.Adam(adapted_manager.trainable_parameters(), lr=0.001)
-    checkpoint_manager.save_last(adapted_model, optimizer, None, 1, {}, 0.5)
-    return config, adapted_model, checkpoint_manager
+    adapted_checkpoint_manager = CheckpointManager(tmp_path / "adapted", config)
+    adapted_optimizer = torch.optim.Adam(adapted_manager.trainable_parameters(), lr=0.001)
+    adapted_checkpoint_manager.save_last(adapted_model, adapted_optimizer, None, 1, {}, 0.5)
+    return (
+        config,
+        source_model,
+        adapted_model,
+        source_checkpoint_manager.checkpoint_path("last.pt"),
+        adapted_checkpoint_manager.checkpoint_path("last.pt"),
+    )
 
 
-def load_lora_model(config, checkpoint_manager):
+def load_like_score_adaptation(config, source_path, adapted_path, log_dir):
     loaded_model = utils.create_model(config)
+    checkpoint_manager = CheckpointManager(log_dir, config)
+    checkpoint_manager.load_model(loaded_model, source_path, torch.device("cpu"))
+    assert "lora" not in checkpoint_manager.model_config
+
+    images = torch.rand(2, 1, 8, 8)
+    source_reconstruction = loaded_model.reconstruct_images(images)
     loaded_manager = LoRAManager(loaded_model, config)
     loaded_manager.inject_adapters()
+    torch.testing.assert_close(
+        source_reconstruction, loaded_model.reconstruct_images(images)
+    )
     checkpoint_manager.load_model(
         loaded_model,
-        checkpoint_manager.checkpoint_path("last.pt"),
+        adapted_path,
         torch.device("cpu"),
     )
     return loaded_model, loaded_manager
 
 
-def test_loaded_lora_checkpoint_preserves_outputs(saved_lora_checkpoint):
-    config, adapted_model, checkpoint_manager = saved_lora_checkpoint
-    loaded_model, _ = load_lora_model(config, checkpoint_manager)
+def test_loaded_lora_checkpoint_preserves_outputs(saved_checkpoints, tmp_path):
+    config, _, adapted_model, source_path, adapted_path = saved_checkpoints
+    loaded_model, _ = load_like_score_adaptation(
+        config, source_path, adapted_path, tmp_path / "loading"
+    )
 
     adapted_model.eval()
     loaded_model.eval()
@@ -95,9 +122,11 @@ def test_loaded_lora_checkpoint_preserves_outputs(saved_lora_checkpoint):
             torch.testing.assert_close(adapted_output, loaded_output)
 
 
-def test_loaded_lora_checkpoint_preserves_adapter_effect(saved_lora_checkpoint):
-    config, _, checkpoint_manager = saved_lora_checkpoint
-    loaded_model, loaded_manager = load_lora_model(config, checkpoint_manager)
+def test_loaded_lora_checkpoint_preserves_adapter_effect(saved_checkpoints, tmp_path):
+    config, source_model, _, source_path, adapted_path = saved_checkpoints
+    loaded_model, loaded_manager = load_like_score_adaptation(
+        config, source_path, adapted_path, tmp_path / "loading"
+    )
 
     images = torch.rand(2, 1, 8, 8)
     adapted_reconstruction = loaded_model.reconstruct_images(images)
@@ -105,15 +134,15 @@ def test_loaded_lora_checkpoint_preserves_adapter_effect(saved_lora_checkpoint):
     base_reconstruction = loaded_model.reconstruct_images(images)
 
     assert not torch.allclose(adapted_reconstruction, base_reconstruction)
+    torch.testing.assert_close(base_reconstruction, source_model.reconstruct_images(images))
 
 
-def test_lora_checkpoint_requires_injected_model(saved_lora_checkpoint):
-    config, _, checkpoint_manager = saved_lora_checkpoint
-    plain_model = utils.create_model(config)
+def test_lora_checkpoint_rejects_different_alpha(saved_checkpoints, tmp_path):
+    config, _, _, source_path, adapted_path = saved_checkpoints
+    different_alpha_config = deepcopy(config)
+    different_alpha_config["lora"]["alpha"] = 8
 
-    with pytest.raises(RuntimeError, match="loading state_dict"):
-        checkpoint_manager.load_model(
-            plain_model,
-            checkpoint_manager.checkpoint_path("last.pt"),
-            torch.device("cpu"),
+    with pytest.raises(ValueError, match="LoRA alpha differs"):
+        load_like_score_adaptation(
+            different_alpha_config, source_path, adapted_path, tmp_path / "loading"
         )

@@ -52,13 +52,14 @@ class AdaptationScorer:
                 x = batch[0].to(self.device)
                 outputs= model.reconstruct_images(x)
 
-                mse = torch.nn.functional.mse_loss(outputs, x)
+                mse_per_pixel = torch.square(outputs - x)
+                mse_per_image = mse_per_pixel.flatten(start_dim=1).mean(dim=1)
 
-                total_mse += mse.sum()
+                total_mse += mse_per_image.sum().item()
 
         mean_mse = total_mse / len(dataloader.dataset)
 
-        return mean_mse.item()
+        return mean_mse
     
     def reconstruct_images(self, model, images):
         model.eval()
