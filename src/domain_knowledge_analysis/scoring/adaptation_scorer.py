@@ -50,10 +50,9 @@ class AdaptationScorer:
             for batch in dataloader:
 
                 x = batch[0].to(self.device)
-                outputs, _, _ = model(x)
+                outputs= model.reconstruct_images(x)
 
                 mse = torch.nn.functional.mse_loss(outputs, x)
-                mse.flatten(start_dim=1).mean(dim=1)
 
                 total_mse += mse.sum()
 
@@ -69,7 +68,7 @@ class AdaptationScorer:
             for x in images:
 
                 x = x.to(self.device)
-                outputs = model(x)
+                outputs = model.reconstruct_images(x)
 
                 reconstructions.append(outputs.cpu())
 
