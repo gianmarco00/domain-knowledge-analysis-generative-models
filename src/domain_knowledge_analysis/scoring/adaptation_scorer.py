@@ -50,12 +50,12 @@ class AdaptationScorer:
             for batch in dataloader:
 
                 x = batch[0].to(self.device)
-                outputs = model(x)
+                outputs, _, _ = model(x)
 
                 mse = torch.nn.functional.mse_loss(outputs, x)
                 mse.flatten(start_dim=1).mean(dim=1)
 
-                total_mse = mse.sum()
+                total_mse += mse.sum()
 
         mean_mse = total_mse / len(dataloader.dataset)
 

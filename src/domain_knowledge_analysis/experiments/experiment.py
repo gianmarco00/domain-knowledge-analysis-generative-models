@@ -1,6 +1,6 @@
 from domain_knowledge_analysis.training import Trainer, TensorBoardLogger, CheckpointManager
 from domain_knowledge_analysis.scoring import DomainScorer, AdaptationScorer
-from domain_knowledge_analysis.plotting import Plotter
+from domain_knowledge_analysis.plotting import Plotter, AdaptationPlotter
 from domain_knowledge_analysis.adapters import LoRAManager
 
 from domain_knowledge_analysis import utils
@@ -172,7 +172,11 @@ class Experiment():
 
         scorer = AdaptationScorer(self.model, lora_manager, target_dataloader, source_dataloader, self.config, self.device)
 
-        scores = scorer.score()
+        results = scorer.score()
+
+        plotter = AdaptationPlotter(self.log_dir)
+
+        plotter.plot(results)
 
         
 
