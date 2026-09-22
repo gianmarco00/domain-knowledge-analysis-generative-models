@@ -119,9 +119,13 @@ def create_log_dir(config):
     repo_root = get_repo_root()
     experiment_name = config["experiment"]["name"]
     pretrained_model_path = repo_root / Path(config["pretrained_model"]) if config["pretrained_model"] else None
+    lora_pretrained_model_path = repo_root / Path(config["lora"]["pretrained_model"]) if config["lora"] and config["lora"]["pretrained_model"] else None
 
     if pretrained_model_path is not None and config["lora"] is None:
         return pretrained_model_path.parent.parent
+    
+    if lora_pretrained_model_path is not None and config["lora"] is not None:
+        return lora_pretrained_model_path.parent.parent
 
     runs_dir = config["paths"]["runs_dir"]
     runs_dir = repo_root / runs_dir

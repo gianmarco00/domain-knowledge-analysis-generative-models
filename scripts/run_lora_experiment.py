@@ -15,7 +15,7 @@ def main():
 
         experiment = Experiment(path)
         print(f"Running {yaml} experiment")
-        experiment.adapt()
+        experiment.score_adaptation()
 
 
 if __name__ == "__main__":

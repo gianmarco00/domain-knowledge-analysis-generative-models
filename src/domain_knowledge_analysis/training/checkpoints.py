@@ -7,13 +7,13 @@ class CheckpointManager():
         self.config = config
 
         self.checkpoint_dir = log_dir / "checkpoints"
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
 
     def checkpoint_path(self, filename):
         return self.checkpoint_dir / filename
 
     def save_checkpoint(self, model, optimizer, lr_scheduler, epoch, history, validation_loss, filename):
+
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         torch.save({
             "model_state_dict": model.state_dict(),

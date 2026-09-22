@@ -76,7 +76,7 @@ scoring:
       enabled: false
 
 lora:
-  pretrained_model: runs/vae_mnist_lr_0.001_29_jul_1606_B_beta_1.7_LD_16/adapt_vae_mnist_finetuned_on_rotated_mnist_20_sep_1404_rank_8_alpha_4/checkpoints/best.pt
+  pretrained_model: Null
   layers_to_inject:
     encoder: [fc, conv]
     decoder: [fc, conv, convtranspose]

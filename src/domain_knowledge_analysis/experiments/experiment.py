@@ -149,18 +149,18 @@ class Experiment():
 
     def score_adaptation(self):
 
-        if self.config["lora"]["pretrained_model"]:
-            self.lora_pretrained_model_path = Path(utils.get_repo_root() / self.config["lora"]["pretrained_model"])
-            self.model = self.checkpoint_manager.load_model(self.model, self.lora_pretrained_model_path, self.device)
-        else:
-            self.adapt()
-
         self.source_config = self.checkpoint_manager.model_config
         self.source_dataset_name = self.source_config["dataset"]["name"]
 
         if self.source_dataset_name != self.config["dataset"]["name"]:
             raise ValueError(f"The source dataset ({self.source_dataset_name}) differs from the expected source dataset ({self.config['dataset']['name']}).")
         
+        if self.config["lora"]["pretrained_model"]:
+            self.lora_pretrained_model_path = Path(utils.get_repo_root() / self.config["lora"]["pretrained_model"])
+            self.model = self.checkpoint_manager.load_model(self.model, self.lora_pretrained_model_path, self.device)
+        else:
+            self.adapt()
+
         target_dataloader = utils.create_testing_dataloaders(
             config=self.config,
             transformation_config=self.config["lora"]["transformed_dataset"],
