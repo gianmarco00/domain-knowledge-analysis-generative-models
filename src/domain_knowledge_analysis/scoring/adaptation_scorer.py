@@ -68,7 +68,7 @@ class AdaptationScorer:
         with torch.no_grad():
             for x in images:
 
-                x = x.to(self.device)
+                x = x.unsqueeze(0).to(self.device)
                 outputs = model.reconstruct_images(x)
 
                 reconstructions.append(outputs.cpu())

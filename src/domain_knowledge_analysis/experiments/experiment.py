@@ -29,6 +29,10 @@ class Experiment():
         else:
             self.model = self.train()
 
+        if self.config["lora"] is not None and "adapt" in self.config["experiment"]["name"]:
+            self.lora_manager = LoRAManager(self.model, self.config)
+            self.lora_manager.inject_adapters()
+
         
     def train(self):
 
@@ -108,9 +112,6 @@ class Experiment():
         if self.config["lora"] is None or "adapt" not in self.config["experiment"]["name"]:
             raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
 
-        lora_manager = LoRAManager(self.model, self.config)
-        lora_manager.inject_adapters()
-
         self.source_config = self.checkpoint_manager.model_config
         self.source_dataset_name = self.source_config["dataset"]["name"]
 
@@ -122,7 +123,7 @@ class Experiment():
             transformation_config=self.config["lora"]["transformed_dataset"],
         )
 
-        optimizer = utils.create_optimizer(self.config, lora_manager.trainable_parameters())
+        optimizer = utils.create_optimizer(self.config, self.lora_manager.trainable_parameters())
 
         lr_scheduler, lr_scheduler_start_epoch = utils.create_lr_scheduler(self.config, optimizer)
 
@@ -148,12 +149,6 @@ class Experiment():
 
     def score_adaptation(self):
 
-        if self.config["lora"] is None or "adapt" not in self.config["experiment"]["name"]:
-            raise ValueError("LoRA configuration is missing in the config file or wrong experiment name.")
-
-        lora_manager = LoRAManager(self.model, self.config)
-        lora_manager.inject_adapters()
-
         if self.config["lora"]["pretrained_model"]:
             self.lora_pretrained_model_path = Path(utils.get_repo_root() / self.config["lora"]["pretrained_model"])
             self.model = self.checkpoint_manager.load_model(self.model, self.lora_pretrained_model_path, self.device)
@@ -175,7 +170,7 @@ class Experiment():
             transformation_config=None,
         )
 
-        scorer = AdaptationScorer(self.model, lora_manager, target_dataloader, source_dataloader, self.config, self.device)
+        scorer = AdaptationScorer(self.model, self.lora_manager, target_dataloader, source_dataloader, self.config, self.device)
 
         results = scorer.score()
 
