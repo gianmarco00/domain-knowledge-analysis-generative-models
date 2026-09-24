@@ -152,6 +152,74 @@ def create_random_generator(seed):
     generator.manual_seed(seed)
     return generator
 
+def create_regularizer_transformations(config, device=None):
+    from .dataset_utils import create_dataset_transformation
+
+    transformation_configs = config["lora"]["regularizer"]["transformations"]
+    transformation_functions = []
+    intensities = []
+
+    for transformation_type, transformation_intensities in transformation_configs:
+        for intensity in transformation_intensities:
+            intensity = float(intensity)
+
+            if intensity == 0:
+                raise ValueError("A regularizer transformation intensity cannot be zero.")
+
+            transformation_functions.append(create_dataset_transformation(transformation_type, intensity))
+            intensities.append(intensity)
+
+    if not transformation_functions:
+        raise ValueError("At least one regularizer transformation is required.")
+
+    return transformation_functions, torch.tensor(intensities, dtype=torch.float32, device=device)
+
+def select_anchor_points(config, dataset_name, device=None):
+    from .dataset_utils import create_train_validation_datasets
+
+    num_anchor_points = config["lora"]["regularizer"]["num_anchor_points"]
+    num_anchor_points = int(num_anchor_points)
+
+    if num_anchor_points <= 0:
+        raise ValueError("The number of anchor points must be positive.")
+
+    train_dataset, _ = create_train_validation_datasets(config, dataset_name)
+    indices_by_class = {}
+
+    for index in range(len(train_dataset)):
+        _, label = train_dataset[index]
+        label = torch.as_tensor(label)
+
+        if label.numel() != 1:
+            raise ValueError("Anchor-point selection requires one class label per image.")
+
+        class_label = int(label.item())
+        indices_by_class.setdefault(class_label, []).append(index)
+
+    if not indices_by_class:
+        raise ValueError("Cannot select anchor points from an empty training dataset.")
+
+    num_classes = len(indices_by_class)
+
+    if num_anchor_points % num_classes != 0:
+        raise ValueError(f"num_anchor_points ({num_anchor_points}) must be divisible by the number of classes ({num_classes}).")
+
+    points_per_class = num_anchor_points // num_classes
+    generator = create_random_generator(config["seed"])
+    selected_indices = []
+
+    for class_label in sorted(indices_by_class):
+        class_indices = indices_by_class[class_label]
+
+        if len(class_indices) < points_per_class:
+            raise ValueError(f"Class {class_label} has only {len(class_indices)} samples, but {points_per_class} anchor points were requested.")
+
+        selected_positions = torch.randperm(len(class_indices), generator=generator)[:points_per_class]
+        selected_indices.extend(class_indices[position] for position in selected_positions.tolist())
+
+    anchor_points = torch.stack([train_dataset[index][0] for index in selected_indices])
+    return anchor_points.to(device) if device is not None else anchor_points
+
 def sample_random_latents(n_images, latent_dim, generator):
     return torch.randn(n_images, latent_dim, generator=generator, device="cpu")
 
@@ -175,4 +243,3 @@ def create_loss(config):
         return vae_loss
     
     raise ValueError(f"Unsupported loss for model: {model_name}")
-

@@ -132,9 +132,13 @@ class Experiment():
 
         if self.config["lora"]["regularizer"] is not None:
             transformations = utils.create_regularizer_transformations(self.config)
-            anchor_points = utils.select_anchor_points(self.source_dataset_name)
+            anchor_points = utils.select_anchor_points(self.config, self.source_dataset_name, self.device)
             regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points)
+            regularizer_eta = self.config["lora"]["regularizer"]["eta"]
+        else:
+            regularizer = None
 
+        
         self.print_tensorboard_instructions(self.log_dir)
 
         trainer = Trainer(
@@ -149,6 +153,8 @@ class Experiment():
             device=self.device,
             checkpoint_manager=self.checkpoint_manager,
             logger=self.logger,
+            regularizer=regularizer,
+            regularizer_eta=regularizer_eta
         )
 
         trainer.fit()
