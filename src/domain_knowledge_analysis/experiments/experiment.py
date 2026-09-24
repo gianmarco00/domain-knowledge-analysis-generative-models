@@ -2,6 +2,7 @@ from domain_knowledge_analysis.training import Trainer, TensorBoardLogger, Check
 from domain_knowledge_analysis.scoring import DomainScorer, AdaptationScorer
 from domain_knowledge_analysis.plotting import Plotter, AdaptationPlotter
 from domain_knowledge_analysis.adapters import LoRAManager
+from domain_knowledge_analysis.regularizers import TFRegularizer
 
 from domain_knowledge_analysis import utils
 
@@ -128,6 +129,11 @@ class Experiment():
         lr_scheduler, lr_scheduler_start_epoch = utils.create_lr_scheduler(self.config, optimizer)
 
         loss = utils.create_loss(self.source_config)
+
+        if self.config["lora"]["regularizer"] is not None:
+            transformations = utils.create_regularizer_transformations(self.config)
+            anchor_points = utils.select_anchor_points(self.source_dataset_name)
+            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points)
 
         self.print_tensorboard_instructions(self.log_dir)
 

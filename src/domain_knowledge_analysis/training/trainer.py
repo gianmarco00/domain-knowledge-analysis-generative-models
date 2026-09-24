@@ -5,7 +5,7 @@ from collections import defaultdict
 from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, checkpoint_manager=None, logger=None):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, regularizer=None, regularizer_eta=1.0, checkpoint_manager=None, logger=None):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
@@ -17,6 +17,8 @@ class Trainer:
         self.device = device
         self.logger = logger
         self.checkpoint_manager = checkpoint_manager
+        self.regularizer = regularizer
+        self.regularizer_eta = regularizer_eta.to(self.device)
 
         self.num_images_to_log = 36
         self.num_images_to_reconstruct = 16
@@ -50,7 +52,13 @@ class Trainer:
 
             self.optimizer.zero_grad()
             logits, mean, log_variance = self.model(x)
-            loss_value = self.loss(x, logits, mean, log_variance)
+
+            if not self.regularizer:
+                loss_value = self.loss(x, logits, mean, log_variance)
+            else:
+                regularizer_loss = self.regularizer()
+                loss_value = self.loss(x, logits, mean, log_variance) + self.regularizer_eta * regularizer_loss
+
             loss_value.backward()
             self.optimizer.step()
 
@@ -60,6 +68,8 @@ class Trainer:
             if callable(getattr(self.loss, "components", None)):
                 for name, value in self.loss.components().items():
                     total_loss_components[name] += torch.sum(value).item()
+                if self.regularizer:
+                    total_loss_components["regularizer"] += regularizer_loss.item() * batch_size
 
         mean_loss = total_loss / total_samples
         mean_loss_components = {name: value / total_samples for name, value in total_loss_components.items()}
@@ -75,18 +85,30 @@ class Trainer:
         total_loss_components = defaultdict(float)
 
         with torch.no_grad():
+
+            if self.regularizer:
+                regularizer_loss = self.regularizer()
+            
             for batch in self.validate_dataloader:
 
                 x = batch[0].to(self.device)
-                logits, mean, log_variance = self.model(x)
-                loss_value = self.loss(x, logits, mean, log_variance)
+                batch_size = len(x)
 
-                total_loss += loss_value.item() * len(x)
-                total_samples += len(x)
+                logits, mean, log_variance = self.model(x)
+
+                if not self.regularizer:
+                    loss_value = self.loss(x, logits, mean, log_variance)
+                else:
+                    loss_value = self.loss(x, logits, mean, log_variance) + self.regularizer_eta * regularizer_loss
+
+                total_loss += loss_value.item() * batch_size
+                total_samples += batch_size
             
                 if callable(getattr(self.loss, "components", None)):
                     for name, value in self.loss.components().items():
                         total_loss_components[name] += torch.sum(value).item()
+                    if self.regularizer:
+                        total_loss_components["regularizer"] += regularizer_loss.item() * batch_size
 
         mean_loss = total_loss / total_samples
         mean_loss_components = {name: value / total_samples for name, value in total_loss_components.items()}

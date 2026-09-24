@@ -29,6 +29,11 @@ class Vae(nn.Module):
         reconstructed_x = self.decoder(z)
         return reconstructed_x, mean, log_variance
     
+    def deterministic_forward(self, x):
+        mean, log_variance = self.encoder(x)
+        reconstructed_x = self.decoder(mean)
+        return reconstructed_x
+    
     def reparametrize(self, mean, log_variance):
         std = torch.exp(0.5*log_variance)
         eps = torch.randn_like(std)

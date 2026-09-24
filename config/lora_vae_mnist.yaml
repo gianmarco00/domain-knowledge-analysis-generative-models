@@ -89,6 +89,8 @@ lora:
     train: true
     train_split: 0.8
     shape: [1, 28, 28]
+  regularizer:
+    transformations: [("rotation", [15, 30, 45])]
 
 
 seed: 42
