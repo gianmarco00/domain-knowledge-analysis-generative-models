@@ -5,9 +5,10 @@ import torch
 
 
 class AdaptationPlotter:
-    def __init__(self, log_dir):
+    def __init__(self, log_dir, lora_config=None):
         self.output_dir = Path(log_dir) / "results"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.lora_config = lora_config
 
     def plot(self, results, filename="adaptation_reconstructions.png"):
         columns = [
@@ -23,14 +24,14 @@ class AdaptationPlotter:
         if num_images == 0 or any(len(batch) != num_images for batch in image_batches):
             raise ValueError("All six image groups must contain the same nonzero number of images.")
 
-        figure = plt.figure(figsize=(14, 2.2 * num_images + 2.5), facecolor="white")
+        figure = plt.figure(figsize=(14, 2.2 * num_images + 2.8), facecolor="white")
         grid = figure.add_gridspec(
             num_images,
             7,
             width_ratios=[1, 1, 1, 0.25, 1, 1, 1],
             left=0.08,
             right=0.98,
-            bottom=0.09,
+            bottom=0.11,
             top=0.82,
             wspace=0.12,
             hspace=0.16,
@@ -62,18 +63,46 @@ class AdaptationPlotter:
         figure.text(target_center, 0.91, "TARGET", ha="center", fontsize=12, weight="bold")
         figure.text(
             0.5,
-            0.035,
+            0.065,
             "Each row shows the same position in the source and target test batches. "
             "MSE is the mean per-pixel squared error over the full test split (lower is better).",
             ha="center",
             fontsize=9,
             color="0.35",
         )
+        self._add_regularizer_footer(figure)
 
         save_path = self.output_dir / filename
         figure.savefig(save_path, dpi=180, facecolor="white")
         plt.close(figure)
         return save_path
+
+    def _add_regularizer_footer(self, figure):
+        if self.lora_config is None:
+            return
+
+        regularizer_config = self.lora_config.get("regularizer")
+
+        if regularizer_config is None:
+            summary = "Regularizer: none"
+        else:
+            transformations = []
+
+            for transformation_name, intensities in regularizer_config["transformations"]:
+                intensity_list = ", ".join(f"{float(intensity):g}" for intensity in intensities)
+                transformations.append(f"{transformation_name}: [{intensity_list}]")
+
+            summary = f"TF regularizer  |  {'; '.join(transformations)}  |  eta: {float(regularizer_config['eta']):g}  |  anchor points: {int(regularizer_config['num_anchor_points'])}"
+
+        footer = figure.add_axes([0.08, 0.012, 0.90, 0.035])
+        footer.set_facecolor("0.95")
+        footer.set_xticks([])
+        footer.set_yticks([])
+
+        for spine in footer.spines.values():
+            spine.set_visible(False)
+
+        footer.text(0.5, 0.5, summary, ha="center", va="center", fontsize=8, color="0.25")
 
     @staticmethod
     def _as_image_batch(images):

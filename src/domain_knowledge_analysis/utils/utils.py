@@ -40,6 +40,12 @@ def build_run_name(config):
             rank = config["lora"]["rank"]
             alpha = config["lora"]["alpha"]
             finetuning_dataset = config["lora"]["transformed_dataset"]["name"]
+
+            if config["lora"]["regularizer"] is not None:
+                eta = config["lora"]["regularizer"]["eta"]
+                k = len(config["lora"]["transformations"])
+                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_rank_{rank}_alpha_{alpha}"
+            
             return f"{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_rank_{rank}_alpha_{alpha}"
         
         return f"{experiment_name}_lr_{learning_rate}_{timestamp}_{loss}_beta_{beta}_LD_{latent_dims}"
