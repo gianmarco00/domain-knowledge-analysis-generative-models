@@ -90,10 +90,10 @@ lora:
     train_split: 0.8
     shape: [1, 28, 28]
   regularizer:
-    num_anchor_points: 128
+    num_anchor_points: 300
     eta: 1.0
     transformations: 
-      - [["rotation", [15, 30, 45]]]
+      - ["rotation", [15, 30, 45]]
 
 
 seed: 42

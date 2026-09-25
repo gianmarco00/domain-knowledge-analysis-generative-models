@@ -18,7 +18,7 @@ class Trainer:
         self.logger = logger
         self.checkpoint_manager = checkpoint_manager
         self.regularizer = regularizer
-        self.regularizer_eta = regularizer_eta.to(self.device)
+        self.regularizer_eta = torch.as_tensor(regularizer_eta, self.device)
 
         self.num_images_to_log = 36
         self.num_images_to_reconstruct = 16

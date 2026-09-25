@@ -131,12 +131,12 @@ class Experiment():
         loss = utils.create_loss(self.source_config)
 
         if self.config["lora"]["regularizer"] is not None:
-            transformations = utils.create_regularizer_transformations(self.config)
+            transformations = utils.create_regularizer_transformations(self.config, self.device)
             anchor_points = utils.select_anchor_points(self.config, self.source_dataset_name, self.device)
             regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points)
             regularizer_eta = self.config["lora"]["regularizer"]["eta"]
         else:
-            regularizer = None
+            regularizer, regularizer_eta = None
 
         
         self.print_tensorboard_instructions(self.log_dir)
