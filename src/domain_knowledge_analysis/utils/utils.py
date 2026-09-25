@@ -42,9 +42,11 @@ def build_run_name(config):
             finetuning_dataset = config["lora"]["transformed_dataset"]["name"]
 
             if config["lora"]["regularizer"] is not None:
-                eta = config["lora"]["regularizer"]["eta"]
-                k = len(config["lora"]["transformations"])
-                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_rank_{rank}_alpha_{alpha}"
+                regularizer_config = config["lora"]["regularizer"]
+                eta = regularizer_config["eta"]
+                num_anchor_points = regularizer_config["num_anchor_points"]
+                k = sum(len(intensities) for _, intensities in regularizer_config["transformations"])
+                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}_rank_{rank}_alpha_{alpha}"
             
             return f"{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_rank_{rank}_alpha_{alpha}"
         
