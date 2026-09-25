@@ -136,7 +136,7 @@ class Experiment():
             regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points)
             regularizer_eta = self.config["lora"]["regularizer"]["eta"]
         else:
-            regularizer, regularizer_eta = None
+            regularizer, regularizer_eta = None, 0.0
 
         
         self.print_tensorboard_instructions(self.log_dir)
@@ -170,12 +170,14 @@ class Experiment():
         if self.config["lora"]["pretrained_model"]:
             self.lora_pretrained_model_path = Path(utils.get_repo_root() / self.config["lora"]["pretrained_model"])
             self.model = self.checkpoint_manager.load_model(self.model, self.lora_pretrained_model_path, self.device)
+            self.lora_config = self.checkpoint_manager.model_config["lora"]
         else:
             self.adapt()
+            self.lora_config = self.config["lora"]
 
         target_dataloader = utils.create_testing_dataloaders(
             config=self.config,
-            transformation_config=self.config["lora"]["transformed_dataset"],
+            transformation_config=self.lora_config["transformed_dataset"],
         )
         source_dataloader = utils.create_testing_dataloaders(
             config=self.source_config,
@@ -186,7 +188,7 @@ class Experiment():
 
         results = scorer.score()
 
-        plotter = AdaptationPlotter(self.log_dir)
+        plotter = AdaptationPlotter(self.log_dir, self.lora_config)
 
         plotter.plot(results)
 
