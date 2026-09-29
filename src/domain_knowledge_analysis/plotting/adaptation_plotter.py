@@ -24,14 +24,14 @@ class AdaptationPlotter:
         if num_images == 0 or any(len(batch) != num_images for batch in image_batches):
             raise ValueError("All six image groups must contain the same nonzero number of images.")
 
-        figure = plt.figure(figsize=(14, 2.2 * num_images + 2.8), facecolor="white")
+        figure = plt.figure(figsize=(14, 2.2 * num_images + 3.0), facecolor="white")
         grid = figure.add_gridspec(
             num_images,
             7,
             width_ratios=[1, 1, 1, 0.25, 1, 1, 1],
             left=0.08,
             right=0.98,
-            bottom=0.11,
+            bottom=0.13,
             top=0.82,
             wspace=0.12,
             hspace=0.16,
@@ -63,7 +63,7 @@ class AdaptationPlotter:
         figure.text(target_center, 0.91, "TARGET", ha="center", fontsize=12, weight="bold")
         figure.text(
             0.5,
-            0.065,
+            0.09,
             "Each row shows the same position in the source and target test batches. "
             "MSE is the mean per-pixel squared error over the full test split (lower is better).",
             ha="center",
@@ -92,9 +92,12 @@ class AdaptationPlotter:
                 intensity_list = ", ".join(f"{float(intensity):g}" for intensity in intensities)
                 transformations.append(f"{transformation_name}: [{intensity_list}]")
 
-            summary = f"TF regularizer  |  {'; '.join(transformations)}  |  eta: {float(regularizer_config['eta']):g}  |  anchor points: {int(regularizer_config['num_anchor_points'])}"
+            midpoint = (len(transformations) + 1) // 2
+            first_line = f"TF regularizer  |  {'; '.join(transformations[:midpoint])}"
+            second_line = f"{'; '.join(transformations[midpoint:])}  |  eta: {float(regularizer_config['eta']):g}  |  anchor points: {int(regularizer_config['num_anchor_points'])}"
+            summary = f"{first_line}\n{second_line}" if transformations[midpoint:] else first_line
 
-        footer = figure.add_axes([0.08, 0.012, 0.90, 0.035])
+        footer = figure.add_axes([0.08, 0.012, 0.90, 0.06])
         footer.set_facecolor("0.95")
         footer.set_xticks([])
         footer.set_yticks([])
@@ -102,7 +105,7 @@ class AdaptationPlotter:
         for spine in footer.spines.values():
             spine.set_visible(False)
 
-        footer.text(0.5, 0.5, summary, ha="center", va="center", fontsize=8, color="0.25")
+        footer.text(0.5, 0.5, summary, ha="center", va="center", fontsize=7.5, color="0.25", linespacing=1.4)
 
     @staticmethod
     def _as_image_batch(images):

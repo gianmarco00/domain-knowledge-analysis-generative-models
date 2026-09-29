@@ -22,7 +22,7 @@ class CheckpointManager():
             "epoch": epoch,
             "history": history,
             "config": self.config,
-            "validation_loss": validation_loss
+            "validation_loss": validation_loss,
         },
         self.checkpoint_path(filename)
         )

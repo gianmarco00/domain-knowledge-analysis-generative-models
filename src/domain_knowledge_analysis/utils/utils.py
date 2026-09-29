@@ -170,12 +170,13 @@ def create_regularizer_transformations(config, device=None):
     for transformation_type, transformation_intensities in transformation_configs:
         for intensity in transformation_intensities:
             intensity = float(intensity)
+            transformation = create_dataset_transformation(transformation_type, intensity)
 
-            if intensity == 0:
-                raise ValueError("A regularizer transformation intensity cannot be zero.")
+            if transformation.finite_difference_step == 0:
+                raise ValueError("A regularizer transformation must differ from the identity transformation.")
 
-            transformation_functions.append(create_dataset_transformation(transformation_type, intensity))
-            intensities.append(intensity)
+            transformation_functions.append(transformation)
+            intensities.append(transformation.finite_difference_step)
 
     if not transformation_functions:
         raise ValueError("At least one regularizer transformation is required.")

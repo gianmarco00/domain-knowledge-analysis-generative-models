@@ -61,3 +61,32 @@ def test_adaptation_plotter_rejects_mismatched_image_counts(tmp_path):
 
     with pytest.raises(ValueError, match="same nonzero number"):
         AdaptationPlotter(tmp_path).plot(results)
+
+
+def test_adaptation_plotter_wraps_regularizer_configuration_in_footer(tmp_path, monkeypatch):
+    lora_config = {
+        "regularizer": {
+            "transformations": [
+                ["horizontal_translation", [-2, 2]],
+                ["vertical_translation", [-2, 2]],
+                ["rotation", [-15, 15]],
+                ["isotropic_scale", [1 / 1.1, 1.1]],
+                ["aspect_ratio_deformation", [1 / 1.1, 1.1]],
+                ["diagonal_shear", [-0.12, 0.12]],
+                ["stroke_thickness", [-1, 1]],
+            ],
+            "eta": 1.0,
+            "num_anchor_points": 300,
+        },
+    }
+    figures = []
+    monkeypatch.setattr(plt, "close", figures.append)
+
+    AdaptationPlotter(tmp_path, lora_config).plot(make_results())
+
+    footer_text = figures[0].axes[-1].texts[0].get_text()
+    assert "\n" in footer_text
+    assert "horizontal_translation: [-2, 2]" in footer_text
+    assert "stroke_thickness: [-1, 1]" in footer_text
+    assert "eta: 1" in footer_text
+    assert "anchor points: 300" in footer_text

@@ -1,9 +1,11 @@
 from pathlib import Path
+import math
 
 import pytest
 import torch
 from torch.utils.data import TensorDataset
 
+from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.utils import dataset_utils
 
 
@@ -57,6 +59,98 @@ def test_fixed_rotation_preserves_shape_and_uses_zero_fill():
     assert rotated.shape == image.shape
     assert rotated[0, 0, 0].item() < 0.1
     assert rotated[0, 2, 2].item() == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "transformation_type, intensity",
+    [
+        ("horizontal_translation", -2),
+        ("horizontal_translation", 2),
+        ("vertical_translation", -2),
+        ("vertical_translation", 2),
+        ("rotation", -15),
+        ("rotation", 15),
+        ("isotropic_scale", 1 / 1.1),
+        ("isotropic_scale", 1.1),
+        ("aspect_ratio_deformation", 1 / 1.1),
+        ("aspect_ratio_deformation", 1.1),
+        ("diagonal_shear", -0.12),
+        ("diagonal_shear", 0.12),
+        ("stroke_thickness", -0.25),
+        ("stroke_thickness", 0.25),
+        ("stroke_thickness", -1),
+        ("stroke_thickness", 1),
+    ],
+)
+def test_regularizer_transformations_preserve_batched_image_shape(transformation_type, intensity):
+    images = torch.zeros(2, 1, 9, 9)
+    images[:, :, 2:7, 3:6] = 1.0
+    transformation = dataset_utils.create_dataset_transformation(transformation_type, intensity)
+
+    transformed_images = transformation(images)
+
+    assert transformed_images.shape == images.shape
+    assert torch.isfinite(transformed_images).all()
+
+
+def test_fixed_translations_use_the_requested_direction_and_distance():
+    image = torch.zeros(1, 7, 7)
+    image[0, 3, 3] = 1.0
+
+    translated_right = dataset_utils.FixedHorizontalTranslation(2)(image)
+    translated_down = dataset_utils.FixedVerticalTranslation(2)(image)
+
+    assert translated_right[0, 3, 5].item() == pytest.approx(1.0)
+    assert translated_down[0, 5, 3].item() == pytest.approx(1.0)
+
+
+def test_fixed_stroke_thickness_dilates_and_erodes_by_one_pixel():
+    point = torch.zeros(1, 5, 5)
+    point[0, 2, 2] = 1.0
+    square = torch.zeros(1, 5, 5)
+    square[0, 1:4, 1:4] = 1.0
+
+    dilated = dataset_utils.FixedStrokeThickness(1)(point)
+    eroded = dataset_utils.FixedStrokeThickness(-1)(square)
+
+    assert dilated.sum().item() == pytest.approx(9.0)
+    assert eroded.sum().item() == pytest.approx(1.0)
+    assert eroded[0, 2, 2].item() == pytest.approx(1.0)
+
+
+def test_fixed_stroke_thickness_supports_weaker_fractional_effects():
+    point = torch.zeros(1, 5, 5)
+    point[0, 2, 2] = 1.0
+    square = torch.zeros(1, 5, 5)
+    square[0, 1:4, 1:4] = 1.0
+
+    weakly_dilated = dataset_utils.FixedStrokeThickness(0.25)(point)
+    weakly_eroded = dataset_utils.FixedStrokeThickness(-0.25)(square)
+
+    assert weakly_dilated.sum().item() == pytest.approx(3.0)
+    assert weakly_eroded.sum().item() == pytest.approx(7.0)
+    assert weakly_dilated[0, 2, 1].item() == pytest.approx(0.25)
+    assert weakly_eroded[0, 1, 1].item() == pytest.approx(0.75)
+
+
+def test_regularizer_uses_parameter_distance_from_identity():
+    config = {
+        "lora": {
+            "regularizer": {
+                "transformations": [
+                    ["rotation", [-15, 15]],
+                    ["isotropic_scale", [1 / 1.1, 1.1]],
+                    ["diagonal_shear", [-0.12, 0.12]],
+                    ["stroke_thickness", [-0.25, 0.25]],
+                ],
+            },
+        },
+    }
+
+    transformation_functions, intensities = utils.create_regularizer_transformations(config)
+
+    assert len(transformation_functions) == 8
+    assert intensities.tolist() == pytest.approx([15, 15, math.log(1.1), math.log(1.1), 0.12, 0.12, 0.25, 0.25])
 
 
 def test_create_dataset_transformation_rejects_unknown_type():

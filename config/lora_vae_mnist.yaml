@@ -93,7 +93,13 @@ lora:
     num_anchor_points: 300
     eta: 1.0
     transformations: 
-      - ["rotation", [15, 30, 45]]
+      - ["horizontal_translation", [-2, 2]]
+      - ["vertical_translation", [-2, 2]]
+      - ["rotation", [-15, 15]]
+      - ["isotropic_scale", [0.9090909091, 1.10]]
+      - ["aspect_ratio_deformation", [0.9090909091, 1.10]]
+      - ["diagonal_shear", [-0.12, 0.12]]
+      - ["stroke_thickness", [-1, 1]]
 
 
 seed: 42

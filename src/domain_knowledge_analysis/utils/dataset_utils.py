@@ -1,6 +1,8 @@
 from pathlib import Path
+import math
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split, ConcatDataset, Dataset, TensorDataset
 from torchvision import datasets, transforms
 from torchvision.transforms import InterpolationMode
@@ -44,6 +46,7 @@ class FixedRotation:
 
     def __init__(self, degrees):
         self.degrees = float(degrees)
+        self.finite_difference_step = abs(self.degrees)
 
     def __call__(self, image):
         return TF.rotate(
@@ -55,11 +58,120 @@ class FixedRotation:
         )
 
 
+class FixedHorizontalTranslation:
+    """Translate a tensor image horizontally by a fixed number of pixels."""
+
+    def __init__(self, pixels):
+        self.pixels = int(pixels)
+        self.finite_difference_step = abs(float(pixels))
+
+    def __call__(self, image):
+        return TF.affine(image, angle=0, translate=[self.pixels, 0], scale=1.0, shear=[0.0, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
+
+
+class FixedVerticalTranslation:
+    """Translate a tensor image vertically by a fixed number of pixels."""
+
+    def __init__(self, pixels):
+        self.pixels = int(pixels)
+        self.finite_difference_step = abs(float(pixels))
+
+    def __call__(self, image):
+        return TF.affine(image, angle=0, translate=[0, self.pixels], scale=1.0, shear=[0.0, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
+
+
+class FixedIsotropicScale:
+    """Scale a tensor image uniformly around its center."""
+
+    def __init__(self, scale):
+        self.scale = float(scale)
+
+        if self.scale <= 0:
+            raise ValueError("Scale must be positive.")
+
+        self.finite_difference_step = abs(math.log(self.scale))
+
+    def __call__(self, image):
+        return TF.affine(image, angle=0, translate=[0, 0], scale=self.scale, shear=[0.0, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
+
+
+class FixedAspectRatioDeformation:
+    """Scale width and height inversely while preserving the output shape."""
+
+    def __init__(self, horizontal_scale):
+        self.horizontal_scale = float(horizontal_scale)
+
+        if self.horizontal_scale <= 0:
+            raise ValueError("Aspect-ratio scale must be positive.")
+
+        self.finite_difference_step = abs(math.log(self.horizontal_scale))
+
+    def __call__(self, image):
+        height, width = image.shape[-2:]
+        resized_height = max(1, round(height / self.horizontal_scale))
+        resized_width = max(1, round(width * self.horizontal_scale))
+        resized_image = TF.resize(image, [resized_height, resized_width], interpolation=InterpolationMode.BILINEAR, antialias=True)
+        return TF.center_crop(resized_image, [height, width])
+
+
+class FixedDiagonalShear:
+    """Shear the horizontal coordinate by a fixed multiple of the vertical coordinate."""
+
+    def __init__(self, coefficient):
+        self.coefficient = float(coefficient)
+        self.degrees = math.degrees(math.atan(self.coefficient))
+        self.finite_difference_step = abs(self.coefficient)
+
+    def __call__(self, image):
+        return TF.affine(image, angle=0, translate=[0, 0], scale=1.0, shear=[self.degrees, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
+
+
+class FixedStrokeThickness:
+    """Blend an image toward one-pixel dilation or erosion."""
+
+    def __init__(self, intensity):
+        self.intensity = float(intensity)
+
+        if self.intensity == 0 or abs(self.intensity) > 1:
+            raise ValueError("Stroke-thickness intensity must be in [-1, 0) for erosion or (0, 1] for dilation.")
+
+        self.direction = 1 if self.intensity > 0 else -1
+        self.strength = abs(self.intensity)
+        self.finite_difference_step = self.strength
+
+    def __call__(self, image):
+        if self.direction == 1:
+            modified_image = F.max_pool2d(image, kernel_size=3, stride=1, padding=1)
+        else:
+            padded_image = F.pad(image, (1, 1, 1, 1), value=0)
+            modified_image = -F.max_pool2d(-padded_image, kernel_size=3, stride=1)
+
+        return torch.lerp(image, modified_image, self.strength)
+
+
 def create_dataset_transformation(transformation_type, intensity):
     transformation_type = transformation_type.lower()
 
+    if transformation_type == "horizontal_translation":
+        return FixedHorizontalTranslation(pixels=intensity)
+
+    if transformation_type == "vertical_translation":
+        return FixedVerticalTranslation(pixels=intensity)
+
     if transformation_type == "rotation":
         return FixedRotation(degrees=intensity)
+
+    if transformation_type == "isotropic_scale":
+        return FixedIsotropicScale(scale=intensity)
+
+    if transformation_type == "aspect_ratio_deformation":
+        return FixedAspectRatioDeformation(horizontal_scale=intensity)
+
+    if transformation_type == "diagonal_shear":
+        return FixedDiagonalShear(coefficient=intensity)
+
+    if transformation_type == "stroke_thickness":
+        return FixedStrokeThickness(intensity=intensity)
 
     raise ValueError(
         f"Unsupported dataset transformation: {transformation_type}"
