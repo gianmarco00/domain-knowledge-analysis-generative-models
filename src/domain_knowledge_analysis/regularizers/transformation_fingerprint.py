@@ -16,7 +16,7 @@ class TFRegularizer(torch.nn.Module):
     def calibrate(self):
 
         input_delta = (self.transformed_x - self.x.unsqueeze(1)).flatten(start_dim=2)
-        input_scales = torch.sqrt(torch.square(input_delta.mean(0,2)))
+        input_scales = input_delta.square().mean(dim=(0,2)).sqrt()
         self.input_scale_matrix = torch.outer(input_scales, input_scales)
 
         was_training = self.model.training
