@@ -2,6 +2,7 @@ base_config: config/lora_vae_mnist.yaml
 
 ablation:
   output_dir: ablations/vae_mnist_rotated_mnist
+  parallel_models: 2
 
   seeds: [42, 43]
   eta_values: [0.0, 10.0, 100.0, 1000.0]

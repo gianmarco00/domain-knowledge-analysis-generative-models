@@ -1,4 +1,6 @@
 from copy import deepcopy
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
 from pathlib import Path
 
 import torch
@@ -9,6 +11,21 @@ from domain_knowledge_analysis.experiments.ablation_utils import create_transfor
 from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
 from domain_knowledge_analysis.regularizers import TFRegularizer
 from domain_knowledge_analysis.scoring import AdaptationScorer
+
+
+def train_ablation_model(config_path):
+    config_path = Path(config_path)
+    checkpoint_path = config_path.parent / "checkpoints" / "best.pt"
+
+    if checkpoint_path.exists():
+        return str(checkpoint_path)
+
+    print(f"Training: {config_path.parent.name}")
+    experiment = Experiment(config_path)
+    experiment.adapt()
+    experiment.logger.close()
+
+    return str(checkpoint_path)
 
 
 class Ablation:
@@ -26,6 +43,7 @@ class Ablation:
 
     def run(self):
         print(f"Ablation contains {len(self.runs)} unique models.")
+        self.train_models()
         results = []
 
         for index, run in enumerate(self.runs):
@@ -71,6 +89,37 @@ class Ablation:
         print(f"Results saved in: {self.output_dir}")
 
         return results
+
+    def train_models(self):
+        runs_to_train = [run for run in self.runs if not (run["model_dir"] / "checkpoints" / "best.pt").exists()]
+
+        if not runs_to_train:
+            print("All models are already trained.")
+            return
+
+        self.prepare_dataset_caches(runs_to_train)
+        config_paths = [str(run["config_path"]) for run in runs_to_train]
+        parallel_models = min(int(self.ablation_config.get("parallel_models", 1)), len(config_paths))
+        print(f"Training {len(config_paths)} models with {parallel_models} parallel process(es).")
+
+        if parallel_models == 1:
+            for config_path in config_paths:
+                train_ablation_model(config_path)
+            return
+
+        with ProcessPoolExecutor(max_workers=parallel_models, mp_context=get_context("spawn")) as executor:
+            list(executor.map(train_ablation_model, config_paths))
+
+    def prepare_dataset_caches(self, runs):
+        prepared_seeds = set()
+
+        for run in runs:
+            if run["seed"] in prepared_seeds:
+                continue
+
+            config = utils.load_config(run["config_path"])
+            utils.create_training_dataloaders(config, config["lora"]["transformed_dataset"])
+            prepared_seeds.add(run["seed"])
 
     def load_or_train(self, run):
         experiment = Experiment(run["config_path"])
