@@ -10,6 +10,7 @@ dependencies = [
     "tensorboard",
     "tqdm",
     "pytest",
+    "scipy",
 ]
 
 [tool.setuptools.packages.find]

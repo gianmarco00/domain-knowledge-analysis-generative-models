@@ -1,0 +1,52 @@
+base_config: config/lora_vae_mnist.yaml
+
+ablation:
+  output_dir: ablations/vae_mnist_rotated_mnist
+
+  seeds: [42, 43]
+  eta_values: [0.0, 10.0, 100.0, 1000.0]
+
+  transformation_modes:
+    - semantic_perturbations
+    - random_perturbations
+    - both
+
+  m_values:
+    semantic_perturbations: [5, 10]
+    random_perturbations: [5, 10]
+    both: [20]
+
+  max_subsets_per_m: 5
+  subset_selection_seed: 123
+
+  evaluation_mode: both
+  eta_selection_mode: both
+  eta_selection_m: 20
+  target_gain_fraction: 0.95
+
+  final_mode: both
+  final_m: 20
+
+  gram_num_images: 300
+  gram_batch_size: 100
+  qualitative_seed: 42
+  visual_seed: 123
+  num_qualitative_images: 6
+
+  semantic_transformations:
+    - {name: rotation, intensity: 15.0}
+    - {name: horizontal_translation, intensity: 2}
+    - {name: vertical_translation, intensity: 2}
+    - {name: isotropic_scale, intensity: 1.10}
+    - {name: aspect_ratio_deformation, intensity: 1.10}
+    - {name: diagonal_shear, intensity: 0.12}
+    - {name: vertical_shear, intensity: 0.12}
+    - {name: stroke_thickness, intensity: 0.5}
+    - {name: gaussian_blur, intensity: 0.7}
+    - {name: contrast, intensity: 1.2}
+
+  random_perturbation:
+    name: perturbation
+    num_transformations: 10
+    intensity: 0.05
+    direction_seed: 5000

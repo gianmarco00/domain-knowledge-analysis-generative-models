@@ -88,9 +88,8 @@ class AdaptationPlotter:
         else:
             transformations = []
 
-            for transformation_name, intensities in regularizer_config["transformations"]:
-                intensity_list = ", ".join(f"{float(intensity):g}" for intensity in intensities)
-                transformations.append(f"{transformation_name}: [{intensity_list}]")
+            for transformation in regularizer_config["transformations"]:
+                transformations.append(f"{transformation['name']}: {float(transformation['intensity']):g}")
 
             midpoint = (len(transformations) + 1) // 2
             first_line = f"TF regularizer  |  {'; '.join(transformations[:midpoint])}"

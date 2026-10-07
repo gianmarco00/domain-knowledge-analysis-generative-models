@@ -133,8 +133,9 @@ class Experiment():
         if self.config["lora"]["regularizer"] is not None:
             transformations = utils.create_regularizer_transformations(self.config, self.device)
             anchor_points = utils.select_anchor_points(self.config, self.source_dataset_name, self.device)
-            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points)
-            regularizer_eta = self.config["lora"]["regularizer"]["eta"]
+            regularizer_config = self.config["lora"]["regularizer"]
+            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points, calibration_batch_size=regularizer_config.get("calibration_batch_size", 100))
+            regularizer_eta = regularizer_config["eta"]
         else:
             regularizer, regularizer_eta = None, 0.0
 

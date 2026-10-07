@@ -45,7 +45,7 @@ def build_run_name(config):
                 regularizer_config = config["lora"]["regularizer"]
                 eta = regularizer_config["eta"]
                 num_anchor_points = regularizer_config["num_anchor_points"]
-                k = sum(len(intensities) for _, intensities in regularizer_config["transformations"])
+                k = len(regularizer_config["transformations"])
                 return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}_rank_{rank}_alpha_{alpha}"
             
             return f"{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_rank_{rank}_alpha_{alpha}"
@@ -125,6 +125,12 @@ def create_lr_scheduler(config, optimizer):
 def create_log_dir(config):
     
     repo_root = get_repo_root()
+
+    if config["paths"].get("run_dir") is not None:
+        log_dir = repo_root / Path(config["paths"]["run_dir"])
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir
+
     experiment_name = config["experiment"]["name"]
     pretrained_model_path = repo_root / Path(config["pretrained_model"]) if config["pretrained_model"] else None
     lora_pretrained_model_path = repo_root / Path(config["lora"]["pretrained_model"]) if config["lora"] and config["lora"]["pretrained_model"] else None
@@ -167,16 +173,17 @@ def create_regularizer_transformations(config, device=None):
     transformation_functions = []
     intensities = []
 
-    for transformation_type, transformation_intensities in transformation_configs:
-        for intensity in transformation_intensities:
-            intensity = float(intensity)
-            transformation = create_dataset_transformation(transformation_type, intensity)
+    for transformation_config in transformation_configs:
+        transformation_type = transformation_config["name"]
+        intensity = float(transformation_config["intensity"])
+        direction_seed = int(transformation_config.get("direction_seed", 0))
+        transformation = create_dataset_transformation(transformation_type, intensity, direction_seed)
 
-            if transformation.finite_difference_step == 0:
-                raise ValueError("A regularizer transformation must differ from the identity transformation.")
+        if transformation.finite_difference_step == 0:
+            raise ValueError("A regularizer transformation must differ from the identity transformation.")
 
-            transformation_functions.append(transformation)
-            intensities.append(transformation.finite_difference_step)
+        transformation_functions.append(transformation)
+        intensities.append(transformation.finite_difference_step)
 
     if not transformation_functions:
         raise ValueError("At least one regularizer transformation is required.")

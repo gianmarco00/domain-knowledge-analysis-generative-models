@@ -91,14 +91,19 @@ lora:
     shape: [1, 28, 28]
   regularizer:
     num_anchor_points: 300
+    calibration_batch_size: 100
     eta: 10.0
-    transformations: 
-      - ["horizontal_translation", [-2, 2]]
-      - ["vertical_translation", [-2, 2]]
-      - ["rotation", [-15, 15]]
-      - ["isotropic_scale", [0.9090909091, 1.10]]
-      - ["aspect_ratio_deformation", [0.9090909091, 1.10]]
-      - ["diagonal_shear", [-0.12, 0.12]]
+    transformations:
+      - {name: horizontal_translation, intensity: 2}
+      - {name: vertical_translation, intensity: 2}
+      - {name: rotation, intensity: 15}
+      - {name: isotropic_scale, intensity: 1.10}
+      - {name: aspect_ratio_deformation, intensity: 1.10}
+      - {name: diagonal_shear, intensity: 0.12}
+      - {name: vertical_shear, intensity: 0.12}
+      - {name: stroke_thickness, intensity: 0.5}
+      - {name: gaussian_blur, intensity: 0.7}
+      - {name: contrast, intensity: 1.2}
 
 
 seed: 42

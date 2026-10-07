@@ -126,6 +126,40 @@ class FixedDiagonalShear:
         return TF.affine(image, angle=0, translate=[0, 0], scale=1.0, shear=[self.degrees, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
 
 
+class FixedVerticalShear:
+    """Shear the vertical coordinate by a fixed multiple of the horizontal coordinate."""
+
+    def __init__(self, coefficient):
+        self.coefficient = float(coefficient)
+        self.degrees = math.degrees(math.atan(self.coefficient))
+        self.finite_difference_step = abs(self.coefficient)
+
+    def __call__(self, image):
+        return TF.affine(image, angle=0, translate=[0, 0], scale=1.0, shear=[0.0, self.degrees], interpolation=InterpolationMode.BILINEAR, fill=0)
+
+
+class FixedGaussianBlur:
+    """Blur an image with a fixed Gaussian standard deviation."""
+
+    def __init__(self, sigma):
+        self.sigma = float(sigma)
+        self.finite_difference_step = self.sigma
+
+    def __call__(self, image):
+        return TF.gaussian_blur(image, kernel_size=[3, 3], sigma=[self.sigma, self.sigma])
+
+
+class FixedContrast:
+    """Change image contrast by a fixed factor."""
+
+    def __init__(self, factor):
+        self.factor = float(factor)
+        self.finite_difference_step = abs(math.log(self.factor))
+
+    def __call__(self, image):
+        return TF.adjust_contrast(image, self.factor)
+
+
 class FixedStrokeThickness:
     """Blend an image toward one-pixel dilation or erosion."""
 
@@ -149,8 +183,32 @@ class FixedStrokeThickness:
         return torch.lerp(image, modified_image, self.strength)
 
 
-def create_dataset_transformation(transformation_type, intensity):
+class FixedRandomDirectionPerturbation:
+    """Move every image along one fixed random pixel-space direction."""
+
+    def __init__(self, direction_index, intensity, direction_seed=0):
+        self.direction_index = int(direction_index)
+        self.intensity = float(intensity)
+        self.direction_seed = int(direction_seed)
+        self.finite_difference_step = abs(self.intensity)
+
+    def __call__(self, image):
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(self.direction_seed + self.direction_index)
+
+        direction = torch.randn(image.shape[-3:], generator=generator)
+        direction = direction / direction.square().mean().sqrt()
+        direction = direction.to(device=image.device, dtype=image.dtype)
+
+        return image + self.intensity * direction
+
+
+def create_dataset_transformation(transformation_type, intensity, direction_seed=0):
     transformation_type = transformation_type.lower()
+
+    if transformation_type.startswith("random_direction_"):
+        direction_index = int(transformation_type.rsplit("_", 1)[1])
+        return FixedRandomDirectionPerturbation(direction_index, intensity, direction_seed)
 
     if transformation_type == "horizontal_translation":
         return FixedHorizontalTranslation(pixels=intensity)
@@ -169,6 +227,15 @@ def create_dataset_transformation(transformation_type, intensity):
 
     if transformation_type == "diagonal_shear":
         return FixedDiagonalShear(coefficient=intensity)
+
+    if transformation_type == "vertical_shear":
+        return FixedVerticalShear(coefficient=intensity)
+
+    if transformation_type == "gaussian_blur":
+        return FixedGaussianBlur(sigma=intensity)
+
+    if transformation_type == "contrast":
+        return FixedContrast(factor=intensity)
 
     if transformation_type == "stroke_thickness":
         return FixedStrokeThickness(intensity=intensity)

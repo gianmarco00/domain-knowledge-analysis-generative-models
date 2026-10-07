@@ -76,10 +76,14 @@ def test_fixed_rotation_preserves_shape_and_uses_zero_fill():
         ("aspect_ratio_deformation", 1.1),
         ("diagonal_shear", -0.12),
         ("diagonal_shear", 0.12),
+        ("vertical_shear", 0.12),
+        ("gaussian_blur", 0.7),
+        ("contrast", 1.2),
         ("stroke_thickness", -0.25),
         ("stroke_thickness", 0.25),
         ("stroke_thickness", -1),
         ("stroke_thickness", 1),
+        ("random_direction_0", 0.05),
     ],
 )
 def test_regularizer_transformations_preserve_batched_image_shape(transformation_type, intensity):
@@ -138,10 +142,11 @@ def test_regularizer_uses_parameter_distance_from_identity():
         "lora": {
             "regularizer": {
                 "transformations": [
-                    ["rotation", [-15, 15]],
-                    ["isotropic_scale", [1 / 1.1, 1.1]],
-                    ["diagonal_shear", [-0.12, 0.12]],
-                    ["stroke_thickness", [-0.25, 0.25]],
+                    {"name": "rotation", "intensity": 15},
+                    {"name": "isotropic_scale", "intensity": 1.1},
+                    {"name": "diagonal_shear", "intensity": 0.12},
+                    {"name": "stroke_thickness", "intensity": 0.25},
+                    {"name": "random_direction_0", "intensity": 0.05, "direction_seed": 10},
                 ],
             },
         },
@@ -149,8 +154,18 @@ def test_regularizer_uses_parameter_distance_from_identity():
 
     transformation_functions, intensities = utils.create_regularizer_transformations(config)
 
-    assert len(transformation_functions) == 8
-    assert intensities.tolist() == pytest.approx([15, 15, math.log(1.1), math.log(1.1), 0.12, 0.12, 0.25, 0.25])
+    assert len(transformation_functions) == 5
+    assert intensities.tolist() == pytest.approx([15, math.log(1.1), 0.12, 0.25, 0.05])
+
+
+def test_random_direction_is_fixed_and_direction_index_changes_it():
+    images = torch.zeros(2, 1, 9, 9)
+    first = dataset_utils.FixedRandomDirectionPerturbation(0, 0.05, 123)
+    same = dataset_utils.FixedRandomDirectionPerturbation(0, 0.05, 123)
+    different = dataset_utils.FixedRandomDirectionPerturbation(1, 0.05, 123)
+
+    assert torch.equal(first(images), same(images))
+    assert not torch.equal(first(images), different(images))
 
 
 def test_create_dataset_transformation_rejects_unknown_type():

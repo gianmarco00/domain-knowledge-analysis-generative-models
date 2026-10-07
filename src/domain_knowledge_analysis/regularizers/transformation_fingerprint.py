@@ -2,7 +2,7 @@ import torch
 
 
 class TFRegularizer(torch.nn.Module):
-    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10):
+    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100):
         super().__init__()
 
         self.model = model
@@ -12,28 +12,41 @@ class TFRegularizer(torch.nn.Module):
         self.x = anchor_points
         self.num_anchor_points = len(self.x)
         self.anchor_batch_size = anchor_batch_size
-
-        self.transformed_x = self.apply_transform()
+        self.calibration_batch_size = calibration_batch_size
 
         self.shuffle_anchor_indices()
         self.calibrate()
 
     def calibrate(self):
-        input_delta = (self.transformed_x - self.x.unsqueeze(1)).flatten(start_dim=2)
-        input_scales = input_delta.square().mean(dim=(0, 2)).clamp_min(1e-12).sqrt()
-        self.input_scale_matrix = torch.outer(input_scales, input_scales)
+        self.calibrate_input_scale()
 
         was_training = self.model.training
         self.model.eval()
         self.lora_manager.disable_adapters()
 
         with torch.no_grad():
-            self.source_gram_matrices = self.gram_matrix()
+            self.source_gram_matrices = self.gram_matrix_batched(self.calibration_batch_size)
 
         self.lora_manager.enable_adapters()
 
         if was_training:
             self.model.train()
+
+    def calibrate_input_scale(self):
+        # This accumulates the numerator and denominator of input_delta.square().mean(dim=(0, 2)).
+        input_square_sum = torch.zeros(self.num_transformations, dtype=self.x.dtype, device=self.x.device)
+        num_input_values = 0
+
+        for start in range(0, self.num_anchor_points, self.calibration_batch_size):
+            x = self.x[start:start + self.calibration_batch_size]
+            transformed_x = self.apply_transform(x)
+            input_delta = (transformed_x - x.unsqueeze(1)).flatten(start_dim=2)
+
+            input_square_sum += input_delta.square().sum(dim=(0, 2))
+            num_input_values += len(x) * input_delta.shape[-1]
+
+        input_scales = (input_square_sum / num_input_values).clamp_min(1e-12).sqrt()
+        self.input_scale_matrix = torch.outer(input_scales, input_scales)
 
     def shuffle_anchor_indices(self):
         self.anchor_indices = torch.randperm(self.num_anchor_points, device=self.x.device)
@@ -51,19 +64,15 @@ class TFRegularizer(torch.nn.Module):
 
         return anchor_indices
 
-    def apply_transform(self):
+    def apply_transform(self, x):
         with torch.no_grad():
-            transformed_x = torch.stack([t(self.x) for t in self.transformations_functions], dim=1)
+            transformed_x = torch.stack([t(x) for t in self.transformations_functions], dim=1)
 
         return transformed_x
 
     def model_response(self, anchor_indices=None):
-        if anchor_indices is None:
-            x = self.x
-            transformed_x = self.transformed_x
-        else:
-            x = self.x[anchor_indices]
-            transformed_x = self.transformed_x[anchor_indices]
+        x = self.x if anchor_indices is None else self.x[anchor_indices]
+        transformed_x = self.apply_transform(x)
 
         num_anchor_points = len(x)
 
@@ -91,12 +100,22 @@ class TFRegularizer(torch.nn.Module):
 
         return g_matrix
 
+    def gram_matrix_batched(self, batch_size=None):
+        batch_size = batch_size or self.calibration_batch_size
+        gram_matrices = []
+
+        for start in range(0, self.num_anchor_points, batch_size):
+            anchor_indices = torch.arange(start, min(start + batch_size, self.num_anchor_points), device=self.x.device)
+            gram_matrices.append(self.gram_matrix(anchor_indices))
+
+        return torch.cat(gram_matrices)
+
     def forward(self):
         anchor_indices = self.sample_anchor_indices()
 
         current_gram_matrices = self.gram_matrix(anchor_indices)
         source_gram_matrices = self.source_gram_matrices[anchor_indices]
 
-        regularizer_loss = torch.square(current_gram_matrices - source_gram_matrices).sum(dim=(-2, -1)).mean()
+        regularizer_loss = torch.square(current_gram_matrices - source_gram_matrices).mean(dim=(-2, -1)).mean()
 
         return regularizer_loss

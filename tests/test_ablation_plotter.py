@@ -1,0 +1,69 @@
+import pytest
+
+from domain_knowledge_analysis.plotting import AblationPlotter
+
+
+def make_results():
+    results = []
+
+    for seed in [0, 1]:
+        results.append({
+            "seed": seed,
+            "eta": 0.0,
+            "mode": "ordinary_lora",
+            "m": 0,
+            "subset_index": 0,
+            "test_target_gain": 0.08,
+            "test_source_degradation": 0.04,
+            "held_out_gram_error": 0.03,
+        })
+
+        for mode, m_values in {
+            "semantic_perturbations": [5, 10],
+            "random_perturbations": [5, 10],
+            "both": [20],
+        }.items():
+            for m in m_values:
+                num_subsets = 2 if m == 5 else 1
+
+                for subset_index in range(num_subsets):
+                    results.append({
+                        "seed": seed,
+                        "eta": 1.0,
+                        "mode": mode,
+                        "m": m,
+                        "subset_index": subset_index,
+                        "test_target_gain": 0.07 + 0.001 * m,
+                        "test_source_degradation": 0.03 - 0.001 * m,
+                        "held_out_gram_error": 0.02,
+                    })
+
+    return results
+
+
+def test_ablation_plotter_saves_mode_colored_metric_figures(tmp_path):
+    config = {
+        "transformation_modes": ["semantic_perturbations", "random_perturbations", "both"],
+        "eta_values": [0.0, 1.0],
+        "m_values": {
+            "semantic_perturbations": [5, 10],
+            "random_perturbations": [5, 10],
+            "both": [20],
+        },
+    }
+
+    plotter = AblationPlotter(tmp_path, config)
+    plotter.plot_figure_1(make_results())
+    plotter.plot_figure_2(make_results(), 1.0)
+    plotter.plot_heatmaps(make_results())
+
+    assert (tmp_path / "figures" / "figure_1_eta_tradeoff.png").is_file()
+    assert (tmp_path / "figures" / "figure_2_transformation_count.png").is_file()
+    assert (tmp_path / "figures" / "supplementary_eta_M_heatmaps.png").is_file()
+
+
+def test_mean_ci_uses_student_t_for_three_seeds():
+    mean, confidence_interval = AblationPlotter.mean_ci([1.0, 2.0, 3.0])
+
+    assert mean == pytest.approx(2.0)
+    assert confidence_interval == pytest.approx(2.484, abs=0.001)
