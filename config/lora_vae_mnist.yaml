@@ -92,7 +92,7 @@ lora:
   regularizer:
     num_anchor_points: 300
     calibration_batch_size: 100
-    eta: 10.0
+    eta: 10000.0
     transformations:
       - {name: horizontal_translation, intensity: 2}
       - {name: vertical_translation, intensity: 2}
