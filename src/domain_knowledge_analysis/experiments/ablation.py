@@ -7,7 +7,7 @@ import torch
 
 from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.experiments.experiment import Experiment
-from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, generate_model_runs, save_rows, save_yaml, select_eta
+from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, generate_model_runs, save_rows, save_yaml, select_eta, select_model
 from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
 from domain_knowledge_analysis.regularizers import TFRegularizer
 from domain_knowledge_analysis.scoring import AdaptationScorer
@@ -75,17 +75,19 @@ class Ablation:
             self.ablation_config["eta_selection_m"],
             self.ablation_config["target_gain_fraction"],
         )
+        selected_model, model_summary = select_model(results, self.ablation_config["target_gain_fraction"])
 
         save_rows(eta_summary, self.output_dir / "results" / "eta_selection.csv")
-        save_yaml({"eta_star": eta_star}, self.output_dir / "results" / "selected_model.yaml")
+        save_rows(model_summary, self.output_dir / "results" / "model_selection.csv")
+        save_yaml({key: selected_model[key] for key in ["mode", "m", "eta", "validation_target_gain", "validation_source_degradation"]}, self.output_dir / "results" / "selected_model.yaml")
 
         plotter = AblationPlotter(self.output_dir, self.ablation_config)
-        plotter.plot_figure_1(results)
-        plotter.plot_figure_2(results, eta_star)
+        plotter.plot_figure_1(results, selected_model)
+        plotter.plot_figure_2(results, selected_model)
         plotter.plot_heatmaps(results)
-        plotter.plot_qualitative(self.create_qualitative_results(eta_star))
+        plotter.plot_qualitative(self.create_qualitative_results(selected_model))
 
-        print(f"\nSelected eta: {eta_star:g}")
+        print(f"\nSelected model: {selected_model['mode']}, M={selected_model['m']}, eta={selected_model['eta']:g}")
         print(f"Results saved in: {self.output_dir}")
 
         return results
@@ -202,18 +204,12 @@ class Ablation:
 
         return gram_error.item()
 
-    def create_qualitative_results(self, eta_star):
+    def create_qualitative_results(self, selected_model):
         seed = int(self.ablation_config["qualitative_seed"])
         num_images = int(self.ablation_config["num_qualitative_images"])
-        final_mode = self.ablation_config["final_mode"]
-        final_m = int(self.ablation_config["final_m"])
 
         ordinary_run = next(run for run in self.runs if run["seed"] == seed and run["eta"] == 0)
-
-        if eta_star == 0:
-            regularized_run = ordinary_run
-        else:
-            regularized_run = next(run for run in self.runs if run["seed"] == seed and run["eta"] == eta_star and run["mode"] == final_mode and run["m"] == final_m)
+        regularized_run = next(run for run in self.runs if run["seed"] == seed and run["eta"] == selected_model["eta"] and run["mode"] == selected_model["mode"] and run["m"] == selected_model["m"])
 
         ordinary_experiment = self.load_or_train(ordinary_run)
         regularized_experiment = self.load_or_train(regularized_run)
@@ -241,6 +237,7 @@ class Ablation:
         regularized_source = regularized_experiment.model.reconstruct_images(source_images).cpu()
         regularized_target = regularized_experiment.model.reconstruct_images(target_images).cpu()
         regularized_generated = regularized_experiment.model.generate_images(num_images, latents).cpu()
+        responses = self.create_model_responses(ordinary_experiment, regularized_experiment, source_images, selected_model)
 
         ordinary_experiment.logger.close()
         regularized_experiment.logger.close()
@@ -249,4 +246,37 @@ class Ablation:
             "source": {"input": source_images, "base": base_source, "lora": lora_source, "regularized": regularized_source},
             "target": {"input": target_images, "base": base_target, "lora": lora_target, "regularized": regularized_target},
             "generation": {"base": base_generated, "lora": lora_generated, "regularized": regularized_generated},
+            "responses": responses,
+            "selected_model": selected_model,
+        }
+
+    def create_model_responses(self, ordinary_experiment, regularized_experiment, source_images, selected_model):
+        num_images = int(self.ablation_config["num_response_images"])
+        transformation_names = self.ablation_config["response_transformations"]
+        transformation_configs = [transformation for transformation in regularized_experiment.config["lora"]["regularizer"]["transformations"] if transformation["name"] in transformation_names]
+        response_config = deepcopy(regularized_experiment.config)
+        response_config["lora"]["regularizer"]["transformations"] = transformation_configs
+        transformation_functions, _ = utils.create_regularizer_transformations(response_config, ordinary_experiment.device)
+        images = source_images[:num_images].to(ordinary_experiment.device)
+        transformed_images = torch.stack([transformation(images) for transformation in transformation_functions])
+
+        def responses(experiment):
+            experiment.model.eval()
+            experiment.lora_manager.enable_adapters()
+
+            with torch.no_grad():
+                original_output = experiment.model.deterministic_forward(images)
+                transformed_output = experiment.model.deterministic_forward(transformed_images.flatten(0, 1)).reshape(len(transformation_functions), num_images, *original_output.shape[1:])
+
+            return (transformed_output - original_output.unsqueeze(0)).cpu()
+
+        labels = [f"{transformation['name'].replace('_', ' ')} ({float(transformation['intensity']):g})" for transformation in transformation_configs]
+
+        return {
+            "input": images.cpu(),
+            "transformed": transformed_images.cpu(),
+            "lora": responses(ordinary_experiment),
+            "regularized": responses(regularized_experiment),
+            "transformation_labels": labels,
+            "selected_model": selected_model,
         }

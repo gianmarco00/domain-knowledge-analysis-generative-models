@@ -218,3 +218,32 @@ def test_score_gram_error_averages_all_gram_entries(monkeypatch):
     source_dataloader = [(torch.zeros(2, 1, 2, 2), torch.zeros(2))]
 
     assert ablation.score_gram_error(experiment, source_dataloader) == pytest.approx(1.0)
+
+
+def test_model_responses_are_output_differences_for_both_models(monkeypatch):
+    class ResponseModel(torch.nn.Module):
+        def __init__(self, scale):
+            super().__init__()
+            self.scale = scale
+
+        def deterministic_forward(self, images):
+            return self.scale * images
+
+    class ResponseExperiment:
+        def __init__(self, scale):
+            self.device = torch.device("cpu")
+            self.model = ResponseModel(scale)
+            self.lora_manager = FakeLoRAManager()
+            self.config = {"lora": {"regularizer": {"transformations": [{"name": "first", "intensity": 1}, {"name": "second", "intensity": 2}]}}}
+
+    transformations = [lambda images: images + 0.1, lambda images: images - 0.2]
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_regularizer_transformations", lambda config, device: (transformations, None))
+    ablation = Ablation.__new__(Ablation)
+    ablation.ablation_config = {"num_response_images": 2, "response_transformations": ["first", "second"]}
+    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 1000.0}
+    results = ablation.create_model_responses(ResponseExperiment(2), ResponseExperiment(3), torch.zeros(2, 1, 2, 2), selected_model)
+
+    torch.testing.assert_close(results["lora"][0], torch.full((2, 1, 2, 2), 0.2))
+    torch.testing.assert_close(results["lora"][1], torch.full((2, 1, 2, 2), -0.4))
+    torch.testing.assert_close(results["regularized"][0], torch.full((2, 1, 2, 2), 0.3))
+    torch.testing.assert_close(results["regularized"][1], torch.full((2, 1, 2, 2), -0.6))

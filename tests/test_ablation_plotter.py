@@ -1,4 +1,5 @@
 import pytest
+import torch
 
 from domain_knowledge_analysis.plotting import AblationPlotter
 
@@ -51,15 +52,33 @@ def test_ablation_plotter_saves_mode_colored_metric_figures(tmp_path):
             "both": [20],
         },
     }
+    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 1.0}
 
     plotter = AblationPlotter(tmp_path, config)
-    plotter.plot_figure_1(make_results())
-    plotter.plot_figure_2(make_results(), 1.0)
+    plotter.plot_figure_1(make_results(), selected_model)
+    plotter.plot_figure_2(make_results(), selected_model)
     plotter.plot_heatmaps(make_results())
 
     assert (tmp_path / "figures" / "figure_1_eta_tradeoff.png").is_file()
     assert (tmp_path / "figures" / "figure_2_transformation_count.png").is_file()
     assert (tmp_path / "figures" / "supplementary_eta_M_heatmaps.png").is_file()
+
+
+def test_ablation_plotter_saves_model_response_grid(tmp_path):
+    config = {"transformation_modes": [], "eta_values": [], "m_values": {}}
+    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 1000.0}
+    responses = {
+        "input": torch.rand(2, 1, 8, 8),
+        "transformed": torch.rand(2, 2, 1, 8, 8),
+        "lora": torch.rand(2, 2, 1, 8, 8) - 0.5,
+        "regularized": torch.rand(2, 2, 1, 8, 8) - 0.5,
+        "transformation_labels": ["rotation (15)", "isotropic scale (1.1)"],
+        "selected_model": selected_model,
+    }
+
+    AblationPlotter(tmp_path, config).plot_model_responses(responses)
+
+    assert (tmp_path / "figures" / "figure_4_model_responses.png").is_file()
 
 
 def test_mean_ci_uses_student_t_for_three_seeds():

@@ -25,14 +25,13 @@ ablation:
   eta_selection_m: 20
   target_gain_fraction: 0.95
 
-  final_mode: both
-  final_m: 20
-
   gram_num_images: 300
   gram_batch_size: 100
   qualitative_seed: 42
   visual_seed: 123
   num_qualitative_images: 6
+  num_response_images: 2
+  response_transformations: [rotation, horizontal_translation, isotropic_scale, stroke_thickness]
 
   semantic_transformations:
     - {name: rotation, intensity: 15.0}

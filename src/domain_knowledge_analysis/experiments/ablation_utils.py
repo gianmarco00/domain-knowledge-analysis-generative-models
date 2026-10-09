@@ -210,3 +210,37 @@ def select_eta(results, eta_values, selection_mode, selection_m, target_gain_fra
         row["selected"] = row["eta"] == selected["eta"]
 
     return selected["eta"], summary
+
+
+def select_model(results, target_gain_fraction):
+    ordinary_rows = [row for row in results if row["eta"] == 0]
+    ordinary_target_gain = fmean(float(row["validation_target_gain"]) for row in ordinary_rows)
+    required_target_gain = float(target_gain_fraction) * ordinary_target_gain
+    groups = {}
+
+    for row in results:
+        if row["eta"] == 0:
+            continue
+
+        key = row["mode"], int(row["m"]), float(row["eta"])
+        groups.setdefault(key, []).append(row)
+
+    summary = []
+
+    for (mode, m, eta), rows in sorted(groups.items()):
+        summary.append({
+            "mode": mode,
+            "m": m,
+            "eta": eta,
+            "validation_target_gain": fmean(float(row["validation_target_gain"]) for row in rows),
+            "validation_source_degradation": fmean(float(row["validation_source_degradation"]) for row in rows),
+            "required_target_gain": required_target_gain,
+        })
+
+    eligible = [row for row in summary if row["validation_target_gain"] >= required_target_gain]
+    selected = min(eligible, key=lambda row: row["validation_source_degradation"])
+
+    for row in summary:
+        row["selected"] = row is selected
+
+    return selected, summary

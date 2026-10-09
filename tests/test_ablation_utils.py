@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, expand_random_perturbations, generate_model_runs, select_eta, select_transformation_subsets
+from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, expand_random_perturbations, generate_model_runs, select_eta, select_model, select_transformation_subsets
 
 
 def ablation_config():
@@ -149,3 +149,22 @@ def test_eta_selection_uses_95_percent_target_rule_and_lowest_source_degradation
 
     assert eta_star == 1.0
     assert next(row for row in summary if row["eta"] == 1.0)["selected"]
+
+
+def test_model_selection_uses_validation_metrics_across_all_modes_and_m_values():
+    results = []
+
+    for seed in [0, 1]:
+        results.extend([
+            {"seed": seed, "eta": 0.0, "mode": "ordinary_lora", "m": 0, "validation_target_gain": 0.10, "validation_source_degradation": 0.05},
+            {"seed": seed, "eta": 1000.0, "mode": "both", "m": 20, "validation_target_gain": 0.10, "validation_source_degradation": 0.04},
+            {"seed": seed, "eta": 1000.0, "mode": "semantic_perturbations", "m": 10, "validation_target_gain": 0.099, "validation_source_degradation": 0.02},
+            {"seed": seed, "eta": 1000.0, "mode": "random_perturbations", "m": 10, "validation_target_gain": 0.09, "validation_source_degradation": 0.01},
+        ])
+
+    selected, summary = select_model(results, 0.95)
+
+    assert selected["mode"] == "semantic_perturbations"
+    assert selected["m"] == 10
+    assert selected["eta"] == 1000.0
+    assert next(row for row in summary if row["selected"]) == selected
