@@ -13,6 +13,7 @@ class TFRegularizer(torch.nn.Module):
         self.num_anchor_points = len(self.x)
         self.anchor_batch_size = anchor_batch_size
         self.calibration_batch_size = calibration_batch_size
+        self.transformed_x = self.apply_transform(self.x)
 
         self.shuffle_anchor_indices()
         self.calibrate()
@@ -39,7 +40,7 @@ class TFRegularizer(torch.nn.Module):
 
         for start in range(0, self.num_anchor_points, self.calibration_batch_size):
             x = self.x[start:start + self.calibration_batch_size]
-            transformed_x = self.apply_transform(x)
+            transformed_x = self.transformed_x[start:start + self.calibration_batch_size]
             input_delta = (transformed_x - x.unsqueeze(1)).flatten(start_dim=2)
 
             input_square_sum += input_delta.square().sum(dim=(0, 2))
@@ -72,7 +73,7 @@ class TFRegularizer(torch.nn.Module):
 
     def model_response(self, anchor_indices=None):
         x = self.x if anchor_indices is None else self.x[anchor_indices]
-        transformed_x = self.apply_transform(x)
+        transformed_x = self.transformed_x if anchor_indices is None else self.transformed_x[anchor_indices]
 
         num_anchor_points = len(x)
 

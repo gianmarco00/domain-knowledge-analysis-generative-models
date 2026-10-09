@@ -35,8 +35,10 @@ class DummyLoRAManager:
 class AddPattern:
     def __init__(self, pattern):
         self.pattern = torch.tensor(pattern, dtype=torch.float32).reshape(1, 2, 2)
+        self.num_calls = 0
 
     def __call__(self, x):
+        self.num_calls += 1
         return x + self.pattern.to(device=x.device, dtype=x.dtype)
 
 
@@ -128,12 +130,18 @@ def test_calibration_never_sends_more_than_one_chunk_to_the_model():
     assert max(model.batch_sizes) <= 2 * len(transformations[0])
 
 
-def test_transformed_anchor_images_are_not_cached():
+def test_transformed_anchor_images_are_cached():
     anchor_points, transformations = make_inputs()
     model = DummyModel()
     regularizer = TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points, calibration_batch_size=2)
+    calls_after_calibration = [transformation.num_calls for transformation in transformations[0]]
 
-    assert not hasattr(regularizer, "transformed_x")
+    regularizer()
+    regularizer()
+
+    assert regularizer.transformed_x.shape == (len(anchor_points), len(transformations[0]), 1, 2, 2)
+    assert calls_after_calibration == [1, 1, 1]
+    assert [transformation.num_calls for transformation in transformations[0]] == calls_after_calibration
 
 
 def test_regularizer_loss_still_backpropagates_after_batched_calibration():
