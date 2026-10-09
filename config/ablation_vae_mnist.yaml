@@ -20,6 +20,20 @@ ablation:
   max_subsets_per_m: 5
   subset_selection_seed: 123
 
+  extra_runs:
+    - seed: 42
+      eta: 1000.0
+      mode: semantic_no_rotation
+      transformations: [horizontal_translation, vertical_translation, isotropic_scale, diagonal_shear, contrast]
+    - seed: 42
+      eta: 10000.0
+      mode: semantic_no_rotation
+      transformations: [horizontal_translation, vertical_translation, isotropic_scale, diagonal_shear, contrast]
+    - seed: 42
+      eta: 10000.0
+      mode: semantic_perturbations
+      transformations: [rotation, horizontal_translation, vertical_translation, isotropic_scale, aspect_ratio_deformation, diagonal_shear, vertical_shear, stroke_thickness, gaussian_blur, contrast]
+
   evaluation_mode: both
   eta_selection_mode: both
   eta_selection_m: 20

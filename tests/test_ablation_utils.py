@@ -1,10 +1,11 @@
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 import yaml
 
-from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, expand_random_perturbations, generate_model_runs, select_eta, select_model, select_transformation_subsets
+from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, expand_random_perturbations, generate_model_runs, select_eta, select_model, select_named_transformations, select_transformation_subsets
 
 
 def ablation_config():
@@ -89,6 +90,16 @@ def test_full_modes_return_one_subset():
         assert len(subsets[0]) == m
 
 
+def test_named_transformations_keep_yaml_order_and_values():
+    names = ["vertical_translation", "rotation", "contrast"]
+    transformations = select_named_transformations(ablation_config(), names)
+
+    assert [transformation["name"] for transformation in transformations] == names
+    assert transformations[0]["intensity"] == 2
+    assert transformations[1]["intensity"] == 15
+    assert transformations[2]["intensity"] == 1.2
+
+
 def test_ablation_config_generates_expected_unique_models(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     source_checkpoint = "runs/vae_mnist_lr_0.001_29_jul_1606_B_beta_1.7_LD_16/checkpoints/best.pt"
@@ -99,7 +110,10 @@ def test_ablation_config_generates_expected_unique_models(tmp_path):
     with open(repo_root / "config" / "ablation_vae_mnist.yaml") as file:
         config = yaml.safe_load(file)["ablation"]
 
-    runs = generate_model_runs(base_config, config, tmp_path)
+    grid_config = deepcopy(config)
+    extra_runs = grid_config.pop("extra_runs")
+    grid_runs = generate_model_runs(base_config, grid_config, tmp_path / "grid")
+    runs = generate_model_runs(base_config, config, tmp_path / "full")
     num_seeds = len(config["seeds"])
     num_positive_eta = len([eta for eta in config["eta_values"] if float(eta) != 0])
     subsets_per_mode = {}
@@ -112,11 +126,14 @@ def test_ablation_config_generates_expected_unique_models(tmp_path):
             for m in config["m_values"][mode]
         )
 
-    assert len(runs) == num_seeds * (1 + sum(subsets_per_mode.values()) * num_positive_eta)
+    expected_grid_runs = num_seeds * (1 + sum(subsets_per_mode.values()) * num_positive_eta)
+    assert len(grid_runs) == expected_grid_runs
+    assert len(runs) == expected_grid_runs + len(extra_runs)
+    assert {run["model_id"] for run in grid_runs} < {run["model_id"] for run in runs}
     assert len([run for run in runs if run["mode"] == "ordinary_lora"]) == num_seeds
 
     for mode, num_subsets in subsets_per_mode.items():
-        assert len([run for run in runs if run["mode"] == mode]) == num_seeds * num_subsets * num_positive_eta
+        assert len([run for run in runs if run["mode"] == mode and not run["extra_run"]]) == num_seeds * num_subsets * num_positive_eta
 
     assert all(run["config_path"].is_file() for run in runs)
     assert base_config["pretrained_model"] == source_checkpoint
@@ -132,6 +149,19 @@ def test_ablation_config_generates_expected_unique_models(tmp_path):
 
     assert len(semantic_m5_subsets) == 5
     assert len(random_m5_subsets) == 5
+
+    generated_extra_runs = [run for run in runs if run["extra_run"]]
+    assert len(generated_extra_runs) == 3
+    assert {run["seed"] for run in generated_extra_runs} == {42}
+    assert {(run["mode"], run["eta"], run["m"]) for run in generated_extra_runs} == {
+        ("semantic_no_rotation", 1000.0, 5),
+        ("semantic_no_rotation", 10000.0, 5),
+        ("semantic_perturbations", 10000.0, 10),
+    }
+
+    no_rotation_runs = [run for run in generated_extra_runs if run["mode"] == "semantic_no_rotation"]
+    assert all("rotation" not in run["subset"].split("+") for run in no_rotation_runs)
+    assert all(run["subset"] == "horizontal_translation+vertical_translation+isotropic_scale+diagonal_shear+contrast" for run in no_rotation_runs)
 
 
 def test_eta_selection_uses_95_percent_target_rule_and_lowest_source_degradation():

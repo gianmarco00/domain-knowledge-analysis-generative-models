@@ -76,6 +76,12 @@ def transformation_name(transformation_families):
     return "+".join(family["name"] for family in transformation_families) if transformation_families else "none"
 
 
+def select_named_transformations(ablation_config, transformation_names):
+    transformation_families = create_transformation_families(ablation_config, "both")
+    transformations_by_name = {family["name"]: family for family in transformation_families}
+    return [deepcopy(transformations_by_name[name]) for name in transformation_names]
+
+
 def create_training_config(base_config, seed, eta, transformation_families):
     config = deepcopy(base_config)
     config["seed"] = int(seed)
@@ -127,7 +133,7 @@ def generate_model_runs(base_config, ablation_config, output_dir):
     selection_seed = int(ablation_config["subset_selection_seed"])
     runs = {}
 
-    def add_run(seed, eta, mode, subset, subset_index):
+    def add_run(seed, eta, mode, subset, subset_index, extra_run=False):
         config = create_training_config(base_config, seed, eta, subset)
         model_id = training_config_id(config)
 
@@ -151,6 +157,7 @@ def generate_model_runs(base_config, ablation_config, output_dir):
             "m": m,
             "subset_index": int(subset_index),
             "subset": transformation_name(subset),
+            "extra_run": bool(extra_run),
         }
 
     for seed in ablation_config["seeds"]:
@@ -169,6 +176,10 @@ def generate_model_runs(base_config, ablation_config, output_dir):
 
                     for subset_index, subset in enumerate(subsets):
                         add_run(seed, eta, mode, subset, subset_index)
+
+    for extra_run in ablation_config.get("extra_runs", []):
+        subset = select_named_transformations(ablation_config, extra_run["transformations"])
+        add_run(extra_run["seed"], extra_run["eta"], extra_run["mode"], subset, 0, extra_run=True)
 
     return list(runs.values())
 

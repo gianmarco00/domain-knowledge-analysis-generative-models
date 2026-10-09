@@ -61,6 +61,7 @@ class Ablation:
                 "m": run["m"],
                 "subset_index": run["subset_index"],
                 "subset": run["subset"],
+                "extra_run": run["extra_run"],
                 **metrics,
             })
 

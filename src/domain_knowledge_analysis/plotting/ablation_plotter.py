@@ -12,12 +12,14 @@ from scipy.stats import t
 class AblationPlotter:
     MODE_COLORS = {
         "semantic_perturbations": "#0072B2",
+        "semantic_no_rotation": "#CC79A7",
         "random_perturbations": "#D55E00",
         "both": "#009E73",
     }
 
     MODE_LABELS = {
         "semantic_perturbations": "Semantic",
+        "semantic_no_rotation": "Semantic without rotation",
         "random_perturbations": "Random",
         "both": "Semantic + random",
     }
@@ -26,8 +28,17 @@ class AblationPlotter:
         self.output_dir = Path(output_dir) / "figures"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.config = config
-        self.modes = config["transformation_modes"]
-        self.eta_values = sorted(set([0.0, *[float(eta) for eta in config["eta_values"]]]))
+        extra_runs = config.get("extra_runs", [])
+        self.modes = list(dict.fromkeys([*config["transformation_modes"], *[run["mode"] for run in extra_runs]]))
+        self.m_values = {mode: list(config["m_values"].get(mode, [])) for mode in self.modes}
+
+        for run in extra_runs:
+            m = len(run["transformations"])
+
+            if m not in self.m_values[run["mode"]]:
+                self.m_values[run["mode"]].append(m)
+
+        self.eta_values = sorted(set([0.0, *[float(eta) for eta in config["eta_values"]], *[float(run["eta"]) for run in extra_runs]]))
 
     def rows_for(self, results, eta, mode, m):
         if eta == 0:
@@ -69,10 +80,14 @@ class AblationPlotter:
 
         for mode in self.modes:
             color = self.MODE_COLORS[mode]
-            full_m = max(self.config["m_values"][mode])
+            full_m = max(self.m_values[mode])
 
             for eta in positive_eta_values:
                 rows = self.rows_for(results, eta, mode, full_m)
+
+                if not rows:
+                    continue
+
                 source_values = [1000 * float(row["test_source_degradation"]) for row in rows]
                 target_values = [1000 * float(row["test_target_gain"]) for row in rows]
                 source_mean = fmean(source_values)
@@ -116,7 +131,8 @@ class AblationPlotter:
         figure, axes = plt.subplots(1, 3, figsize=(16, 4.8))
         ordinary_rows = [row for row in results if row["eta"] == 0]
         eta_star = float(selected_model["eta"])
-        mode_offsets = {"semantic_perturbations": -0.18, "random_perturbations": 0.18, "both": 0.0}
+        offsets = torch.linspace(-0.27, 0.27, len(self.modes)) if len(self.modes) > 1 else torch.zeros(1)
+        mode_offsets = {mode: offset.item() for mode, offset in zip(self.modes, offsets)}
 
         for axis_index, (axis, (metric, label, reference)) in enumerate(zip(axes, metrics)):
             ordinary_mean = fmean(float(row[metric]) for row in ordinary_rows)
@@ -132,8 +148,12 @@ class AblationPlotter:
             for mode in self.modes:
                 color = self.MODE_COLORS[mode]
 
-                for m in self.config["m_values"][mode]:
+                for m in self.m_values[mode]:
                     rows = self.rows_for(results, eta_star, mode, int(m))
+
+                    if not rows:
+                        continue
+
                     seed_values = [relative(value) for value in self.grouped_values(rows, "seed", metric)]
                     subset_values = [relative(value) for value in self.grouped_values(rows, "subset_index", metric)]
                     position = m + mode_offsets[mode]
@@ -146,7 +166,7 @@ class AblationPlotter:
                     if mode == selected_model["mode"] and m == selected_model["m"]:
                         axis.scatter(position, fmean(seed_values), s=190, facecolor="none", edgecolor="black", linewidth=1.8, zorder=4)
 
-            axis.set_xticks(sorted(set([0, *(m for mode in self.modes for m in self.config["m_values"][mode])])))
+            axis.set_xticks(sorted(set([0, *(m for mode in self.modes for m in self.m_values[mode])])))
             axis.set_xlabel("Number of transformation families M")
             axis.set_ylabel(label)
             axis.axhline(reference, color="0.75", linestyle="--", linewidth=1)
@@ -166,14 +186,28 @@ class AblationPlotter:
         ordinary_target = fmean(float(row["test_target_gain"]) for row in ordinary_rows)
         ordinary_source = fmean(float(row["test_source_degradation"]) for row in ordinary_rows)
         eta_values = [eta for eta in self.eta_values if eta != 0]
-        configurations = [(mode, int(m)) for mode in self.modes for m in self.config["m_values"][mode]]
+        configurations = [(mode, int(m)) for mode in self.modes for m in self.m_values[mode]]
         labels = [f"{self.MODE_LABELS[mode]} (M={m})" for mode, m in configurations]
-        target_matrix = torch.tensor([[100 * fmean(float(row["test_target_gain"]) for row in self.rows_for(results, eta, mode, m)) / ordinary_target for eta in eta_values] for mode, m in configurations])
-        source_matrix = torch.tensor([[100 * (ordinary_source - fmean(float(row["test_source_degradation"]) for row in self.rows_for(results, eta, mode, m))) / ordinary_source for eta in eta_values] for mode, m in configurations])
+
+        def metric_value(eta, mode, m, metric):
+            rows = self.rows_for(results, eta, mode, m)
+
+            if not rows:
+                return float("nan")
+
+            mean = fmean(float(row[metric]) for row in rows)
+            return 100 * mean / ordinary_target if metric == "test_target_gain" else 100 * (ordinary_source - mean) / ordinary_source
+
+        target_matrix = torch.tensor([[metric_value(eta, mode, m, "test_target_gain") for eta in eta_values] for mode, m in configurations])
+        source_matrix = torch.tensor([[metric_value(eta, mode, m, "test_source_degradation") for eta in eta_values] for mode, m in configurations])
         figure, axes = plt.subplots(1, 2, figsize=(12, 5.5))
-        target_image = axes[0].imshow(target_matrix, aspect="auto", cmap="YlGn", vmin=95, vmax=max(100, target_matrix.max().item()))
-        source_limit = max(abs(source_matrix.min().item()), abs(source_matrix.max().item()))
-        source_image = axes[1].imshow(source_matrix, aspect="auto", cmap="RdYlGn", norm=TwoSlopeNorm(vmin=-source_limit, vcenter=0, vmax=source_limit))
+        target_values = target_matrix[~torch.isnan(target_matrix)]
+        source_values = source_matrix[~torch.isnan(source_matrix)]
+        target_cmap = plt.get_cmap("YlGn").with_extremes(bad="0.92")
+        source_cmap = plt.get_cmap("RdYlGn").with_extremes(bad="0.92")
+        target_image = axes[0].imshow(target_matrix, aspect="auto", cmap=target_cmap, vmin=95, vmax=max(100, target_values.max().item()))
+        source_limit = max(abs(source_values.min().item()), abs(source_values.max().item()), 1e-6)
+        source_image = axes[1].imshow(source_matrix, aspect="auto", cmap=source_cmap, norm=TwoSlopeNorm(vmin=-source_limit, vcenter=0, vmax=source_limit))
 
         for axis, image, matrix, title, decimals in [(axes[0], target_image, target_matrix, "Target gain retained versus LoRA (%)", 2), (axes[1], source_image, source_matrix, "Source damage reduced versus LoRA (%)", 1)]:
             axis.set_xticks(range(len(eta_values)), [f"{eta:g}" for eta in eta_values])
@@ -184,6 +218,11 @@ class AblationPlotter:
             for row in range(len(labels)):
                 for column in range(len(eta_values)):
                     value = matrix[row, column].item()
+
+                    if math.isnan(value):
+                        axis.text(column, row, "—", ha="center", va="center", color="0.4", fontsize=9)
+                        continue
+
                     red, green, blue, _ = image.cmap(image.norm(value))
                     text_color = "black" if 0.299 * red + 0.587 * green + 0.114 * blue > 0.52 else "white"
                     axis.text(column, row, f"{value:.{decimals}f}", ha="center", va="center", color=text_color, fontsize=9)
