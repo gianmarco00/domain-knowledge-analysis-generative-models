@@ -1,6 +1,7 @@
 from copy import deepcopy
 from hashlib import sha256
 from itertools import combinations
+from math import comb
 from pathlib import Path
 from statistics import fmean
 
@@ -41,33 +42,36 @@ def select_transformation_subsets(transformation_families, m, require_rotation, 
     if require_rotation:
         rotation = next(family for family in transformation_families if family["name"] == "rotation")
         remaining_families = [family for family in transformation_families if family["name"] != "rotation"]
-        subsets = [[rotation, *subset] for subset in combinations(remaining_families, m - 1)]
+        fixed_families = [rotation]
     else:
-        subsets = [list(subset) for subset in combinations(transformation_families, m)]
+        remaining_families = transformation_families
+        fixed_families = []
 
-    if len(subsets) <= max_subsets:
-        return subsets
+    subset_size = m - len(fixed_families)
+    num_subsets = comb(len(remaining_families), subset_size)
+
+    if num_subsets <= max_subsets:
+        return [[*fixed_families, *subset] for subset in combinations(remaining_families, subset_size)]
 
     generator = random.Random(f"{selection_seed}:{mode}:{m}")
-    generator.shuffle(subsets)
-    balanced_names = [family["name"] for family in transformation_families if not require_rotation or family["name"] != "rotation"]
+    balanced_names = [family["name"] for family in remaining_families]
     family_counts = {name: 0 for name in balanced_names}
     selected_subsets = []
+    selected_names = set()
 
     while len(selected_subsets) < max_subsets:
-        def balance_score(subset):
-            subset_names = {family["name"] for family in subset}
-            updated_counts = [family_counts[name] + int(name in subset_names) for name in balanced_names]
-            overlap = sum(len(subset_names & {family["name"] for family in selected_subset}) ** 2 for selected_subset in selected_subsets)
-            return max(updated_counts) - min(updated_counts), sum(count ** 2 for count in updated_counts), overlap
+        ranked_families = sorted(remaining_families, key=lambda family: (family_counts[family["name"]], generator.random()))
+        selected_subset = [*fixed_families, *ranked_families[:subset_size]]
+        subset_names = tuple(sorted(family["name"] for family in selected_subset))
 
-        selected_subset = min(subsets, key=balance_score)
+        if subset_names in selected_names:
+            continue
+
         selected_subsets.append(selected_subset)
-        subsets.remove(selected_subset)
+        selected_names.add(subset_names)
 
-        for family in selected_subset:
-            if family["name"] in family_counts:
-                family_counts[family["name"]] += 1
+        for family in selected_subset[len(fixed_families):]:
+            family_counts[family["name"]] += 1
 
     return selected_subsets
 
@@ -83,6 +87,8 @@ def select_named_transformations(ablation_config, transformation_names):
 
 
 def create_training_config(base_config, seed, eta, transformation_families):
+    from domain_knowledge_analysis.utils.dataset_utils import TRANSFORMATION_IMPLEMENTATION_VERSION
+
     config = deepcopy(base_config)
     config["seed"] = int(seed)
     config["lora"]["pretrained_model"] = None
@@ -94,6 +100,7 @@ def create_training_config(base_config, seed, eta, transformation_families):
     regularizer_config = deepcopy(base_config["lora"]["regularizer"])
     regularizer_config["eta"] = float(eta)
     regularizer_config["transformations"] = deepcopy(transformation_families)
+    regularizer_config["transformation_implementation_version"] = TRANSFORMATION_IMPLEMENTATION_VERSION
     config["lora"]["regularizer"] = regularizer_config
 
     return config

@@ -131,11 +131,17 @@ class Experiment():
         loss = utils.create_loss(self.source_config)
 
         if self.config["lora"]["regularizer"] is not None:
-            transformations = utils.create_regularizer_transformations(self.config, self.device)
             anchor_points = utils.select_anchor_points(self.config, self.source_dataset_name, self.device)
             regularizer_config = self.config["lora"]["regularizer"]
-            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points, calibration_batch_size=regularizer_config.get("calibration_batch_size", 100))
+            transformations = utils.create_regularizer_transformations(self.config, self.device, anchor_points)
+            resolved_transformations = regularizer_config.get("calibration", {}).get("transformations", [])
+            target_input_scales = [transformation["target_input_rms"] for transformation in resolved_transformations] or None
+            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points, calibration_batch_size=regularizer_config.get("calibration_batch_size", 100), target_input_scales=target_input_scales)
             regularizer_eta = regularizer_config["eta"]
+
+            for transformation in resolved_transformations:
+                distribution = transformation["per_anchor_input_rms"]
+                print(f"{transformation['name']}: intensity={transformation['resolved_intensity']:.6g}, RMS={transformation['achieved_input_rms']:.6g}, per-anchor RMS min/median/max={distribution['min']:.6g}/{distribution['median']:.6g}/{distribution['max']:.6g}")
         else:
             regularizer, regularizer_eta = None, 0.0
 

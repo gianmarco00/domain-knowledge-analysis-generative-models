@@ -256,7 +256,13 @@ class Ablation:
         transformation_names = self.ablation_config["response_transformations"]
         transformation_configs = [transformation for transformation in regularized_experiment.config["lora"]["regularizer"]["transformations"] if transformation["name"] in transformation_names]
         response_config = deepcopy(regularized_experiment.config)
+
+        resolved_transformations = regularized_experiment.config["lora"]["regularizer"].get("calibration", {}).get("transformations", [])
+        resolved_intensities = {transformation["name"]: transformation["resolved_intensity"] for transformation in resolved_transformations}
+        transformation_configs = [{**transformation, "intensity": resolved_intensities.get(transformation["name"], transformation["intensity"])} for transformation in transformation_configs]
         response_config["lora"]["regularizer"]["transformations"] = transformation_configs
+        response_config["lora"]["regularizer"].pop("target_input_rms", None)
+        response_config["lora"]["regularizer"].pop("transformation_strength", None)
         transformation_functions, _ = utils.create_regularizer_transformations(response_config, ordinary_experiment.device)
         images = source_images[:num_images].to(ordinary_experiment.device)
         transformed_images = torch.stack([transformation(images) for transformation in transformation_functions])

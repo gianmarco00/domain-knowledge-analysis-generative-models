@@ -1,8 +1,10 @@
 import torch
 
+from domain_knowledge_analysis.utils.utils import INPUT_SCALE_FLOOR, RMS_ABSOLUTE_TOLERANCE, RMS_RELATIVE_TOLERANCE
+
 
 class TFRegularizer(torch.nn.Module):
-    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100):
+    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None):
         super().__init__()
 
         self.model = model
@@ -13,6 +15,8 @@ class TFRegularizer(torch.nn.Module):
         self.num_anchor_points = len(self.x)
         self.anchor_batch_size = anchor_batch_size
         self.calibration_batch_size = calibration_batch_size
+        self.target_input_rms = float(target_input_rms) if target_input_rms is not None else None
+        self.target_input_scales = torch.as_tensor(target_input_scales, dtype=self.x.dtype, device=self.x.device) if target_input_scales is not None else None
         self.transformed_x = self.apply_transform(self.x)
 
         self.shuffle_anchor_indices()
@@ -37,6 +41,7 @@ class TFRegularizer(torch.nn.Module):
         # This accumulates the numerator and denominator of input_delta.square().mean(dim=(0, 2)).
         input_square_sum = torch.zeros(self.num_transformations, dtype=self.x.dtype, device=self.x.device)
         num_input_values = 0
+        per_anchor_input_rms = []
 
         for start in range(0, self.num_anchor_points, self.calibration_batch_size):
             x = self.x[start:start + self.calibration_batch_size]
@@ -45,9 +50,22 @@ class TFRegularizer(torch.nn.Module):
 
             input_square_sum += input_delta.square().sum(dim=(0, 2))
             num_input_values += len(x) * input_delta.shape[-1]
+            per_anchor_input_rms.append(input_delta.square().mean(dim=2).sqrt())
 
-        input_scales = (input_square_sum / num_input_values).clamp_min(1e-12).sqrt()
-        self.input_scale_matrix = torch.outer(input_scales, input_scales)
+        self.input_scales = (input_square_sum / num_input_values).sqrt()
+        self.per_anchor_input_rms = torch.cat(per_anchor_input_rms)
+
+        if not torch.isfinite(self.input_scales).all() or (self.input_scales <= INPUT_SCALE_FLOOR).any():
+            raise ValueError("Every regularizer transformation must produce a finite input RMS greater than 1e-6.")
+
+        if self.target_input_rms is not None:
+            self.target_input_scales = torch.full_like(self.input_scales, float(self.target_input_rms))
+
+        if self.target_input_scales is not None:
+            if self.target_input_scales.shape != self.input_scales.shape or not torch.allclose(self.input_scales, self.target_input_scales, rtol=RMS_RELATIVE_TOLERANCE, atol=RMS_ABSOLUTE_TOLERANCE):
+                raise ValueError(f"Measured regularizer input scales {self.input_scales.tolist()} do not match calibrated targets {self.target_input_scales.tolist()}.")
+
+        self.input_scale_matrix = torch.outer(self.input_scales, self.input_scales)
 
     def shuffle_anchor_indices(self):
         self.anchor_indices = torch.randperm(self.num_anchor_points, device=self.x.device)

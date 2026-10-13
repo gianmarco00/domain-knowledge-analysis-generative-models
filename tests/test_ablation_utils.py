@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, expand_random_perturbations, generate_model_runs, select_eta, select_model, select_named_transformations, select_transformation_subsets
+from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, expand_random_perturbations, generate_model_runs, select_eta, select_model, select_named_transformations, select_transformation_subsets, training_config_id
 
 
 def ablation_config():
@@ -162,6 +162,18 @@ def test_ablation_config_generates_expected_unique_models(tmp_path):
     no_rotation_runs = [run for run in generated_extra_runs if run["mode"] == "semantic_no_rotation"]
     assert all("rotation" not in run["subset"].split("+") for run in no_rotation_runs)
     assert all(run["subset"] == "horizontal_translation+vertical_translation+isotropic_scale+diagonal_shear+contrast" for run in no_rotation_runs)
+
+
+def test_transformation_strength_changes_ablation_identity():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    with open(repo_root / "config" / "lora_vae_mnist.yaml") as file:
+        first_config = yaml.safe_load(file)
+
+    second_config = deepcopy(first_config)
+    second_config["lora"]["regularizer"]["transformation_strength"] = 0.6
+
+    assert training_config_id(first_config) != training_config_id(second_config)
 
 
 def test_eta_selection_uses_95_percent_target_rule_and_lowest_source_degradation():

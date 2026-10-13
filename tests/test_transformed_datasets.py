@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 import math
 
@@ -84,6 +85,16 @@ def test_fixed_rotation_preserves_shape_and_uses_zero_fill():
         ("stroke_thickness", -1),
         ("stroke_thickness", 1),
         ("random_direction_0", 0.05),
+        ("horizontal_flip", 0.5),
+        ("vertical_flip", 0.5),
+        ("gamma_correction", 1.2),
+        ("binarization", 0.5),
+        ("pixelation", 0.5),
+        ("horizontal_motion_blur", 0.5),
+        ("vertical_motion_blur", 0.5),
+        ("horizontal_wave", 2),
+        ("vertical_wave", 2),
+        ("perspective", 0.2),
     ],
 )
 def test_regularizer_transformations_preserve_batched_image_shape(transformation_type, intensity):
@@ -106,6 +117,69 @@ def test_fixed_translations_use_the_requested_direction_and_distance():
 
     assert translated_right[0, 3, 5].item() == pytest.approx(1.0)
     assert translated_down[0, 5, 3].item() == pytest.approx(1.0)
+
+
+def test_fixed_translations_support_fractional_pixels():
+    image = torch.zeros(1, 5, 5)
+    image[0, 2, 2] = 1.0
+
+    translated_right = dataset_utils.FixedHorizontalTranslation(0.5)(image)
+    translated_down = dataset_utils.FixedVerticalTranslation(0.5)(image)
+
+    assert translated_right[0, 2, 2:4].tolist() == pytest.approx([0.5, 0.5])
+    assert translated_down[0, 2:4, 2].tolist() == pytest.approx([0.5, 0.5])
+
+
+@pytest.mark.parametrize(
+    "transformation_type, identity_intensity",
+    [
+        ("horizontal_translation", 0),
+        ("vertical_translation", 0),
+        ("rotation", 0),
+        ("isotropic_scale", 1),
+        ("aspect_ratio_deformation", 1),
+        ("diagonal_shear", 0),
+        ("vertical_shear", 0),
+        ("stroke_thickness", 0),
+        ("gaussian_blur", 0),
+        ("contrast", 1),
+        ("random_direction_0", 0),
+        ("horizontal_flip", 0),
+        ("vertical_flip", 0),
+        ("gamma_correction", 1),
+        ("binarization", 0),
+        ("pixelation", 0),
+        ("horizontal_motion_blur", 0),
+        ("vertical_motion_blur", 0),
+        ("horizontal_wave", 0),
+        ("vertical_wave", 0),
+        ("perspective", 0),
+    ],
+)
+def test_regularizer_transformations_are_exact_at_identity(transformation_type, identity_intensity):
+    images = torch.rand(2, 1, 9, 9)
+    transformation = dataset_utils.create_dataset_transformation(transformation_type, identity_intensity)
+
+    assert torch.equal(transformation(images), images)
+
+
+def test_aspect_ratio_deformation_is_continuous():
+    image = torch.zeros(1, 9, 9)
+    image[:, 2:7, 3:6] = 1.0
+
+    transformed = dataset_utils.FixedAspectRatioDeformation(1.01)(image)
+
+    assert transformed.shape == image.shape
+    assert not torch.equal(transformed, image)
+
+
+@pytest.mark.parametrize("transformation_type", ["horizontal_flip", "vertical_flip", "binarization", "pixelation", "horizontal_motion_blur", "vertical_motion_blur"])
+def test_bounded_transformations_follow_a_continuous_blend_path(transformation_type):
+    image = torch.rand(2, 1, 9, 9)
+    endpoint = dataset_utils.create_dataset_transformation(transformation_type, 1)(image)
+    midpoint = dataset_utils.create_dataset_transformation(transformation_type, 0.5)(image)
+
+    torch.testing.assert_close(midpoint, torch.lerp(image, endpoint, 0.5))
 
 
 def test_fixed_stroke_thickness_dilates_and_erodes_by_one_pixel():
@@ -156,6 +230,141 @@ def test_regularizer_uses_parameter_distance_from_identity():
 
     assert len(transformation_functions) == 5
     assert intensities.tolist() == pytest.approx([15, math.log(1.1), 0.12, 0.25, 0.05])
+
+
+def target_rms_config(target_input_rms=0.02):
+    return {
+        "lora": {
+            "regularizer": {
+                "target_input_rms": target_input_rms,
+                "calibration_batch_size": 3,
+                "transformations": [
+                    {"name": "horizontal_translation", "intensity": 2},
+                    {"name": "vertical_translation", "intensity": -2},
+                    {"name": "rotation", "intensity": 15},
+                    {"name": "isotropic_scale", "intensity": 1.1},
+                    {"name": "aspect_ratio_deformation", "intensity": 1 / 1.1},
+                    {"name": "diagonal_shear", "intensity": 0.12},
+                    {"name": "vertical_shear", "intensity": -0.12},
+                    {"name": "stroke_thickness", "intensity": 0.5},
+                    {"name": "gaussian_blur", "intensity": 0.7},
+                    {"name": "contrast", "intensity": 1.2},
+                    {"name": "random_direction_0", "intensity": 0.05, "direction_seed": 7},
+                ],
+            },
+        },
+    }
+
+
+def relative_strength_config(transformation_strength=0.5):
+    config = target_rms_config()
+    config["lora"]["regularizer"].pop("target_input_rms")
+    config["lora"]["regularizer"]["transformation_strength"] = transformation_strength
+    config["lora"]["regularizer"]["transformations"] = config["lora"]["regularizer"]["transformations"][:-1]
+    config["lora"]["regularizer"]["transformations"].extend([
+        {"name": "horizontal_flip", "intensity": 0.5},
+        {"name": "vertical_flip", "intensity": 0.5},
+        {"name": "gamma_correction", "intensity": 1.2},
+        {"name": "binarization", "intensity": 0.5},
+        {"name": "pixelation", "intensity": 0.5},
+        {"name": "horizontal_motion_blur", "intensity": 0.5},
+        {"name": "vertical_motion_blur", "intensity": 0.5},
+        {"name": "horizontal_wave", "intensity": 2},
+        {"name": "vertical_wave", "intensity": -2},
+        {"name": "perspective", "intensity": -0.2},
+    ])
+    return config
+
+
+def test_regularizer_transformations_match_shared_target_rms_and_are_deterministic():
+    torch.manual_seed(4)
+    anchors = torch.rand(8, 1, 9, 9)
+    first_config = target_rms_config()
+    second_config = deepcopy(first_config)
+
+    first_transformations, _ = utils.create_regularizer_transformations(first_config, anchor_points=anchors)
+    second_transformations, _ = utils.create_regularizer_transformations(second_config, anchor_points=anchors)
+    first_metadata = first_config["lora"]["regularizer"]["calibration"]["transformations"]
+    second_metadata = second_config["lora"]["regularizer"]["calibration"]["transformations"]
+
+    assert [item["achieved_input_rms"] for item in first_metadata] == pytest.approx([0.02] * len(first_metadata), rel=0.01, abs=1e-8)
+    assert [item["resolved_intensity"] for item in first_metadata] == pytest.approx([item["resolved_intensity"] for item in second_metadata])
+    assert first_metadata[1]["resolved_intensity"] < 0
+    assert first_metadata[4]["resolved_intensity"] < 1
+    assert first_metadata[6]["resolved_intensity"] < 0
+    assert first_metadata[-1]["resolved_intensity"] == pytest.approx(0.02)
+    assert first_metadata[-1]["effective_direction_seed"] == 7
+
+    for first, second in zip(first_transformations, second_transformations):
+        torch.testing.assert_close(first(anchors), second(anchors))
+
+
+@pytest.mark.parametrize("target_input_rms", [0, 1e-6, float("nan")])
+def test_shared_target_rms_must_exceed_input_scale_floor(target_input_rms):
+    anchors = torch.rand(2, 1, 5, 5)
+
+    with pytest.raises(ValueError, match="greater than 1e-06"):
+        utils.create_regularizer_transformations(target_rms_config(target_input_rms), anchor_points=anchors)
+
+
+def test_shared_target_rms_reports_unreachable_transformation():
+    anchors = torch.rand(2, 1, 5, 5)
+    config = target_rms_config(10.0)
+    config["lora"]["regularizer"]["transformations"] = [{"name": "stroke_thickness", "intensity": 0.5}]
+
+    with pytest.raises(ValueError, match=r"stroke_thickness.*measured reachable RMS range"):
+        utils.create_regularizer_transformations(config, anchor_points=anchors)
+
+
+def test_relative_strength_is_a_fraction_of_each_transformation_maximum():
+    torch.manual_seed(4)
+    anchors = torch.rand(8, 1, 9, 9)
+    config = relative_strength_config(0.6)
+
+    utils.create_regularizer_transformations(config, anchor_points=anchors)
+    metadata = config["lora"]["regularizer"]["calibration"]["transformations"]
+
+    assert [item["relative_input_rms"] for item in metadata] == pytest.approx([0.6] * len(metadata), rel=0.01, abs=1e-8)
+    assert all(item["maximum_input_rms"] > item["achieved_input_rms"] for item in metadata)
+    assert metadata[1]["resolved_intensity"] < 0
+    assert metadata[4]["resolved_intensity"] < 1
+    assert metadata[6]["resolved_intensity"] < 0
+
+
+def test_maximum_relative_strength_uses_earliest_actual_maximum():
+    torch.manual_seed(4)
+    anchors = torch.rand(8, 1, 9, 9)
+    config = relative_strength_config(1.0)
+    config["lora"]["regularizer"]["transformations"] = [{"name": "rotation", "intensity": 15}]
+    repeated_config = deepcopy(config)
+
+    transformations, _ = utils.create_regularizer_transformations(config, anchor_points=anchors)
+    utils.create_regularizer_transformations(repeated_config, anchor_points=anchors)
+    metadata = config["lora"]["regularizer"]["calibration"]["transformations"][0]
+    repeated_metadata = repeated_config["lora"]["regularizer"]["calibration"]["transformations"][0]
+    achieved_rms = utils.measure_input_rms(transformations[0], anchors, 3)
+
+    assert 0 < metadata["resolved_intensity"] <= 180
+    assert metadata["resolved_intensity"] == pytest.approx(repeated_metadata["resolved_intensity"])
+    assert achieved_rms == pytest.approx(metadata["maximum_input_rms"], rel=0.01)
+    assert metadata["relative_input_rms"] == pytest.approx(1.0, rel=0.01)
+
+
+@pytest.mark.parametrize("transformation_strength", [0, -0.1, 1.1, float("nan")])
+def test_relative_strength_must_be_in_unit_interval(transformation_strength):
+    anchors = torch.rand(2, 1, 5, 5)
+
+    with pytest.raises(ValueError, match=r"in \(0, 1\]"):
+        utils.create_regularizer_transformations(relative_strength_config(transformation_strength), anchor_points=anchors)
+
+
+def test_relative_strength_rejects_unbounded_random_directions():
+    anchors = torch.rand(2, 1, 5, 5)
+    config = relative_strength_config()
+    config["lora"]["regularizer"]["transformations"] = [{"name": "random_direction_0", "intensity": 0.05, "direction_seed": 7}]
+
+    with pytest.raises(ValueError, match="no finite maximum"):
+        utils.create_regularizer_transformations(config, anchor_points=anchors)
 
 
 def test_random_direction_is_fixed_and_direction_index_changes_it():

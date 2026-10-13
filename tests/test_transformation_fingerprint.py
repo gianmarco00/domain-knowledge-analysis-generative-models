@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from domain_knowledge_analysis.models.vae import Vae
@@ -170,6 +171,35 @@ def test_regularizer_loss_averages_all_gram_entries():
     expected_loss = torch.square(current_grams - source_grams).mean()
 
     torch.testing.assert_close(regularizer(), expected_loss)
+
+
+def test_regularizer_verifies_target_input_rms():
+    anchor_points = torch.rand(4, 1, 2, 2)
+    transformations = ([AddPattern([0.1, 0.0, 0.0, 0.0])], torch.tensor([0.1]))
+    model = DummyModel()
+
+    regularizer = TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points, target_input_rms=0.05)
+
+    torch.testing.assert_close(regularizer.input_scales, torch.tensor([0.05]))
+
+
+def test_regularizer_verifies_per_transformation_input_scales():
+    anchor_points = torch.rand(4, 1, 2, 2)
+    transformations = ([AddPattern([0.1, 0.0, 0.0, 0.0]), AddPattern([0.0, 0.2, 0.0, 0.0])], torch.tensor([0.1, 0.2]))
+    model = DummyModel()
+
+    regularizer = TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points, target_input_scales=[0.05, 0.1])
+
+    torch.testing.assert_close(regularizer.input_scales, torch.tensor([0.05, 0.1]))
+
+
+def test_regularizer_rejects_unresolved_input_scale():
+    anchor_points = torch.rand(4, 1, 2, 2)
+    transformations = ([AddPattern([0.0, 0.0, 0.0, 0.0])], torch.tensor([0.0]))
+    model = DummyModel()
+
+    with pytest.raises(ValueError, match="greater than 1e-6"):
+        TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points)
 
 
 def test_vae_deterministic_forward_returns_differentiable_pixel_probabilities():

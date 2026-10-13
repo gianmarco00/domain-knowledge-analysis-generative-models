@@ -38,7 +38,27 @@ MEDMNIST_DATASETS = {
 }
 
 
-TRANSFORMED_DATASET_CACHE_VERSION = 1
+TRANSFORMATION_IMPLEMENTATION_VERSION = 4
+TRANSFORMED_DATASET_CACHE_VERSION = 4
+
+
+def affine_sample(image, theta):
+    """Apply a fixed-shape bilinear affine transform with zero padding and align_corners=False."""
+    is_unbatched = image.ndim == 3
+    images = image.unsqueeze(0) if is_unbatched else image
+    theta = images.new_tensor(theta).unsqueeze(0).expand(len(images), -1, -1)
+    grid = F.affine_grid(theta, images.shape, align_corners=False)
+    transformed = F.grid_sample(images, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+    return transformed[0] if is_unbatched else transformed
+
+
+def dense_sample(image, grid):
+    """Sample a fixed-shape dense grid with bilinear interpolation, zero padding and align_corners=False."""
+    is_unbatched = image.ndim == 3
+    images = image.unsqueeze(0) if is_unbatched else image
+    grid = grid.unsqueeze(0).expand(len(images), -1, -1, -1)
+    transformed = F.grid_sample(images, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+    return transformed[0] if is_unbatched else transformed
 
 
 class FixedRotation:
@@ -46,9 +66,13 @@ class FixedRotation:
 
     def __init__(self, degrees):
         self.degrees = float(degrees)
+        self.intensity = self.degrees
         self.finite_difference_step = abs(self.degrees)
 
     def __call__(self, image):
+        if self.degrees == 0:
+            return image
+
         return TF.rotate(
             image,
             angle=self.degrees,
@@ -59,25 +83,33 @@ class FixedRotation:
 
 
 class FixedHorizontalTranslation:
-    """Translate a tensor image horizontally by a fixed number of pixels."""
+    """Translate horizontally by fractional pixels using bilinear sampling and zero padding."""
 
     def __init__(self, pixels):
-        self.pixels = int(pixels)
-        self.finite_difference_step = abs(float(pixels))
+        self.pixels = float(pixels)
+        self.intensity = self.pixels
+        self.finite_difference_step = abs(self.pixels)
 
     def __call__(self, image):
-        return TF.affine(image, angle=0, translate=[self.pixels, 0], scale=1.0, shear=[0.0, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
+        if self.pixels == 0:
+            return image
+
+        return affine_sample(image, [[1, 0, -2 * self.pixels / image.shape[-1]], [0, 1, 0]])
 
 
 class FixedVerticalTranslation:
-    """Translate a tensor image vertically by a fixed number of pixels."""
+    """Translate vertically by fractional pixels using bilinear sampling and zero padding."""
 
     def __init__(self, pixels):
-        self.pixels = int(pixels)
-        self.finite_difference_step = abs(float(pixels))
+        self.pixels = float(pixels)
+        self.intensity = self.pixels
+        self.finite_difference_step = abs(self.pixels)
 
     def __call__(self, image):
-        return TF.affine(image, angle=0, translate=[0, self.pixels], scale=1.0, shear=[0.0, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
+        if self.pixels == 0:
+            return image
+
+        return affine_sample(image, [[1, 0, 0], [0, 1, -2 * self.pixels / image.shape[-2]]])
 
 
 class FixedIsotropicScale:
@@ -89,9 +121,13 @@ class FixedIsotropicScale:
         if self.scale <= 0:
             raise ValueError("Scale must be positive.")
 
+        self.intensity = self.scale
         self.finite_difference_step = abs(math.log(self.scale))
 
     def __call__(self, image):
+        if self.scale == 1:
+            return image
+
         return TF.affine(image, angle=0, translate=[0, 0], scale=self.scale, shear=[0.0, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
 
 
@@ -104,14 +140,14 @@ class FixedAspectRatioDeformation:
         if self.horizontal_scale <= 0:
             raise ValueError("Aspect-ratio scale must be positive.")
 
+        self.intensity = self.horizontal_scale
         self.finite_difference_step = abs(math.log(self.horizontal_scale))
 
     def __call__(self, image):
-        height, width = image.shape[-2:]
-        resized_height = max(1, round(height / self.horizontal_scale))
-        resized_width = max(1, round(width * self.horizontal_scale))
-        resized_image = TF.resize(image, [resized_height, resized_width], interpolation=InterpolationMode.BILINEAR, antialias=True)
-        return TF.center_crop(resized_image, [height, width])
+        if self.horizontal_scale == 1:
+            return image
+
+        return affine_sample(image, [[1 / self.horizontal_scale, 0, 0], [0, self.horizontal_scale, 0]])
 
 
 class FixedDiagonalShear:
@@ -120,9 +156,13 @@ class FixedDiagonalShear:
     def __init__(self, coefficient):
         self.coefficient = float(coefficient)
         self.degrees = math.degrees(math.atan(self.coefficient))
+        self.intensity = self.coefficient
         self.finite_difference_step = abs(self.coefficient)
 
     def __call__(self, image):
+        if self.coefficient == 0:
+            return image
+
         return TF.affine(image, angle=0, translate=[0, 0], scale=1.0, shear=[self.degrees, 0.0], interpolation=InterpolationMode.BILINEAR, fill=0)
 
 
@@ -132,9 +172,13 @@ class FixedVerticalShear:
     def __init__(self, coefficient):
         self.coefficient = float(coefficient)
         self.degrees = math.degrees(math.atan(self.coefficient))
+        self.intensity = self.coefficient
         self.finite_difference_step = abs(self.coefficient)
 
     def __call__(self, image):
+        if self.coefficient == 0:
+            return image
+
         return TF.affine(image, angle=0, translate=[0, 0], scale=1.0, shear=[0.0, self.degrees], interpolation=InterpolationMode.BILINEAR, fill=0)
 
 
@@ -143,10 +187,20 @@ class FixedGaussianBlur:
 
     def __init__(self, sigma):
         self.sigma = float(sigma)
+
+        if self.sigma < 0:
+            raise ValueError("Gaussian-blur sigma must be nonnegative.")
+
+        self.intensity = self.sigma
         self.finite_difference_step = self.sigma
 
     def __call__(self, image):
-        return TF.gaussian_blur(image, kernel_size=[3, 3], sigma=[self.sigma, self.sigma])
+        if self.sigma == 0:
+            return image
+
+        max_kernel_size = 2 * min(image.shape[-2:]) - 1
+        kernel_size = min(2 * math.ceil(3 * self.sigma) + 1, max_kernel_size)
+        return TF.gaussian_blur(image, kernel_size=[kernel_size, kernel_size], sigma=[self.sigma, self.sigma])
 
 
 class FixedContrast:
@@ -154,10 +208,145 @@ class FixedContrast:
 
     def __init__(self, factor):
         self.factor = float(factor)
+
+        if self.factor <= 0:
+            raise ValueError("Contrast factor must be positive.")
+
+        self.intensity = self.factor
         self.finite_difference_step = abs(math.log(self.factor))
 
     def __call__(self, image):
+        if self.factor == 1:
+            return image
+
         return TF.adjust_contrast(image, self.factor)
+
+
+class FixedGammaCorrection:
+    """Apply a fixed positive gamma exponent."""
+
+    def __init__(self, gamma):
+        self.gamma = float(gamma)
+
+        if self.gamma <= 0:
+            raise ValueError("Gamma must be positive.")
+
+        self.intensity = self.gamma
+        self.finite_difference_step = abs(math.log(self.gamma))
+
+    def __call__(self, image):
+        if self.gamma == 1:
+            return image
+
+        return image.clamp_min(0).pow(self.gamma)
+
+
+class FixedBlendTransformation:
+    """Blend continuously from the identity to a fixed transformation endpoint."""
+
+    def __init__(self, intensity):
+        self.intensity = float(intensity)
+
+        if not 0 <= self.intensity <= 1:
+            raise ValueError("Blend intensity must be in [0, 1].")
+
+        self.finite_difference_step = self.intensity
+
+    def endpoint(self, image):
+        raise NotImplementedError
+
+    def __call__(self, image):
+        if self.intensity == 0:
+            return image
+
+        return torch.lerp(image, self.endpoint(image), self.intensity)
+
+
+class FixedHorizontalFlip(FixedBlendTransformation):
+    def endpoint(self, image):
+        return image.flip(-1)
+
+
+class FixedVerticalFlip(FixedBlendTransformation):
+    def endpoint(self, image):
+        return image.flip(-2)
+
+
+class FixedBinarization(FixedBlendTransformation):
+    def endpoint(self, image):
+        return (image >= 0.5).to(image.dtype)
+
+
+class FixedPixelation(FixedBlendTransformation):
+    def endpoint(self, image):
+        is_unbatched = image.ndim == 3
+        images = image.unsqueeze(0) if is_unbatched else image
+        pixelated = F.interpolate(F.adaptive_avg_pool2d(images, (2, 2)), size=images.shape[-2:], mode="nearest")
+        return pixelated[0] if is_unbatched else pixelated
+
+
+class FixedMotionBlur(FixedBlendTransformation):
+    def __init__(self, intensity, vertical=False):
+        super().__init__(intensity)
+        self.vertical = vertical
+
+    def endpoint(self, image):
+        image_size = image.shape[-2] if self.vertical else image.shape[-1]
+        kernel_size = image_size if image_size % 2 else image_size - 1
+        padding = kernel_size // 2
+
+        if self.vertical:
+            return F.avg_pool2d(F.pad(image, (0, 0, padding, padding), mode="reflect"), kernel_size=(kernel_size, 1), stride=1)
+
+        return F.avg_pool2d(F.pad(image, (padding, padding, 0, 0), mode="reflect"), kernel_size=(1, kernel_size), stride=1)
+
+
+class FixedWave:
+    """Displace rows or columns sinusoidally using bilinear sampling and zero padding."""
+
+    def __init__(self, amplitude, vertical=False):
+        self.amplitude = float(amplitude)
+        self.vertical = vertical
+        self.intensity = self.amplitude
+        self.finite_difference_step = abs(self.amplitude)
+
+    def __call__(self, image):
+        if self.amplitude == 0:
+            return image
+
+        height, width = image.shape[-2:]
+        theta = image.new_tensor([[1, 0, 0], [0, 1, 0]]).unsqueeze(0)
+        grid = F.affine_grid(theta, (1, image.shape[-3], height, width), align_corners=False)[0]
+
+        if self.vertical:
+            grid[..., 1] -= 2 * self.amplitude * torch.sin(math.pi * grid[..., 0]) / height
+        else:
+            grid[..., 0] -= 2 * self.amplitude * torch.sin(math.pi * grid[..., 1]) / width
+
+        return dense_sample(image, grid)
+
+
+class FixedPerspective:
+    """Apply a horizontal keystone deformation with a fixed output shape."""
+
+    def __init__(self, coefficient):
+        self.coefficient = float(coefficient)
+
+        if abs(self.coefficient) >= 1:
+            raise ValueError("Perspective coefficient must be in (-1, 1).")
+
+        self.intensity = self.coefficient
+        self.finite_difference_step = abs(self.coefficient)
+
+    def __call__(self, image):
+        if self.coefficient == 0:
+            return image
+
+        height, width = image.shape[-2:]
+        theta = image.new_tensor([[1, 0, 0], [0, 1, 0]]).unsqueeze(0)
+        grid = F.affine_grid(theta, (1, image.shape[-3], height, width), align_corners=False)[0]
+        grid[..., 0] /= 1 + self.coefficient * grid[..., 1]
+        return dense_sample(image, grid)
 
 
 class FixedStrokeThickness:
@@ -166,14 +355,17 @@ class FixedStrokeThickness:
     def __init__(self, intensity):
         self.intensity = float(intensity)
 
-        if self.intensity == 0 or abs(self.intensity) > 1:
-            raise ValueError("Stroke-thickness intensity must be in [-1, 0) for erosion or (0, 1] for dilation.")
+        if abs(self.intensity) > 1:
+            raise ValueError("Stroke-thickness intensity must be in [-1, 1].")
 
-        self.direction = 1 if self.intensity > 0 else -1
+        self.direction = 1 if self.intensity >= 0 else -1
         self.strength = abs(self.intensity)
         self.finite_difference_step = self.strength
 
     def __call__(self, image):
+        if self.strength == 0:
+            return image
+
         if self.direction == 1:
             modified_image = F.max_pool2d(image, kernel_size=3, stride=1, padding=1)
         else:
@@ -193,6 +385,9 @@ class FixedRandomDirectionPerturbation:
         self.finite_difference_step = abs(self.intensity)
 
     def __call__(self, image):
+        if self.intensity == 0:
+            return image
+
         generator = torch.Generator(device="cpu")
         generator.manual_seed(self.direction_seed + self.direction_index)
 
@@ -237,8 +432,38 @@ def create_dataset_transformation(transformation_type, intensity, direction_seed
     if transformation_type == "contrast":
         return FixedContrast(factor=intensity)
 
+    if transformation_type == "gamma_correction":
+        return FixedGammaCorrection(gamma=intensity)
+
     if transformation_type == "stroke_thickness":
         return FixedStrokeThickness(intensity=intensity)
+
+    if transformation_type == "horizontal_flip":
+        return FixedHorizontalFlip(intensity=intensity)
+
+    if transformation_type == "vertical_flip":
+        return FixedVerticalFlip(intensity=intensity)
+
+    if transformation_type == "binarization":
+        return FixedBinarization(intensity=intensity)
+
+    if transformation_type == "pixelation":
+        return FixedPixelation(intensity=intensity)
+
+    if transformation_type == "horizontal_motion_blur":
+        return FixedMotionBlur(intensity=intensity)
+
+    if transformation_type == "vertical_motion_blur":
+        return FixedMotionBlur(intensity=intensity, vertical=True)
+
+    if transformation_type == "horizontal_wave":
+        return FixedWave(amplitude=intensity)
+
+    if transformation_type == "vertical_wave":
+        return FixedWave(amplitude=intensity, vertical=True)
+
+    if transformation_type == "perspective":
+        return FixedPerspective(coefficient=intensity)
 
     raise ValueError(
         f"Unsupported dataset transformation: {transformation_type}"

@@ -1,5 +1,5 @@
 from .dataset_utils import create_dataset, create_transform, create_training_dataloaders, create_testing_dataloaders, create_scoring_dataloaders, create_calibration_dataloader
-from .utils import create_model, create_optimizer, create_lr_scheduler, create_loss, get_repo_root, set_seed, load_config, get_device, create_log_dir, build_run_name, sample_random_latents, create_random_generator, create_regularizer_transformations, select_anchor_points
+from .utils import create_model, create_optimizer, create_lr_scheduler, create_loss, get_repo_root, set_seed, load_config, get_device, create_log_dir, build_run_name, sample_random_latents, create_random_generator, create_regularizer_transformations, measure_input_rms, select_anchor_points
 from .lora_utils import select_layers
 
 __all__ = [
@@ -24,4 +24,5 @@ __all__ = [
     "select_layers",
     "select_anchor_points",
     "create_regularizer_transformations",
+    "measure_input_rms",
 ]

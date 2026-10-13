@@ -92,6 +92,7 @@ lora:
   regularizer:
     num_anchor_points: 300
     calibration_batch_size: 100
+    transformation_strength: 0.5
     eta: 10000.0
     transformations:
       - {name: horizontal_translation, intensity: 2}
@@ -104,6 +105,16 @@ lora:
       - {name: stroke_thickness, intensity: 0.5}
       - {name: gaussian_blur, intensity: 0.7}
       - {name: contrast, intensity: 1.2}
+      - {name: horizontal_flip, intensity: 0.5}
+      - {name: vertical_flip, intensity: 0.5}
+      - {name: gamma_correction, intensity: 1.2}
+      - {name: binarization, intensity: 0.5}
+      - {name: pixelation, intensity: 0.5}
+      - {name: horizontal_motion_blur, intensity: 0.5}
+      - {name: vertical_motion_blur, intensity: 0.5}
+      - {name: horizontal_wave, intensity: 2.0}
+      - {name: vertical_wave, intensity: 2.0}
+      - {name: perspective, intensity: 0.2}
 
 
 seed: 42

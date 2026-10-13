@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime
 from functools import partial
 
+import math
 import random
 
 import yaml
@@ -11,6 +12,14 @@ from domain_knowledge_analysis.models import Vae
 from domain_knowledge_analysis.losses import VAELoss
 from domain_knowledge_analysis.math import continuous_bernoulli_log_prob_from_logits, bernoulli_log_prob_from_logits
 
+
+INPUT_SCALE_FLOOR = 1e-6
+RMS_RELATIVE_TOLERANCE = 0.01
+RMS_ABSOLUTE_TOLERANCE = 1e-8
+MAXIMUM_RELATIVE_TOLERANCE = 1e-6
+CALIBRATION_SEARCH_STEPS = 64
+MAXIMUM_REFINEMENT_STEPS = 4
+BOUNDED_BLEND_TRANSFORMATIONS = {"horizontal_flip", "vertical_flip", "binarization", "pixelation", "horizontal_motion_blur", "vertical_motion_blur"}
 
 
 def load_config(config_path):
@@ -42,11 +51,17 @@ def build_run_name(config):
             finetuning_dataset = config["lora"]["transformed_dataset"]["name"]
 
             if config["lora"]["regularizer"] is not None:
+                from .dataset_utils import TRANSFORMATION_IMPLEMENTATION_VERSION
+
                 regularizer_config = config["lora"]["regularizer"]
                 eta = regularizer_config["eta"]
                 num_anchor_points = regularizer_config["num_anchor_points"]
                 k = len(regularizer_config["transformations"])
-                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}_rank_{rank}_alpha_{alpha}"
+                target_input_rms = regularizer_config.get("target_input_rms")
+                transformation_strength = regularizer_config.get("transformation_strength")
+                rms_name = f"_RMS_{float(target_input_rms):g}" if target_input_rms is not None else ""
+                strength_name = f"_S_{float(transformation_strength):g}" if transformation_strength is not None else ""
+                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}{rms_name}{strength_name}_TV_{TRANSFORMATION_IMPLEMENTATION_VERSION}_rank_{rank}_alpha_{alpha}"
             
             return f"{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_rank_{rank}_alpha_{alpha}"
         
@@ -166,24 +181,376 @@ def create_random_generator(seed):
     generator.manual_seed(seed)
     return generator
 
-def create_regularizer_transformations(config, device=None):
+def measure_transformation(transformation, anchor_points, batch_size, return_per_anchor=False):
+    square_sum = 0.0
+    output_variation_sum = 0.0
+    num_values = 0
+    per_anchor_rms = []
+
+    with torch.no_grad():
+        for start in range(0, len(anchor_points), batch_size):
+            anchors = anchor_points[start:start + batch_size]
+            transformed = transformation(anchors)
+            delta = transformed - anchors
+            square_sum += delta.square().sum().item()
+            output_mean = transformed.flatten(start_dim=1).mean(dim=1).view(-1, 1, 1, 1)
+            output_variation_sum += (transformed - output_mean).square().sum().item()
+            num_values += delta.numel()
+
+            if return_per_anchor:
+                per_anchor_rms.append(delta.flatten(start_dim=1).square().mean(dim=1).sqrt().cpu())
+
+    input_rms = math.sqrt(square_sum / num_values)
+    output_variation = math.sqrt(output_variation_sum / num_values)
+    per_anchor_rms = torch.cat(per_anchor_rms) if return_per_anchor else None
+    return input_rms, output_variation, per_anchor_rms
+
+
+def measure_input_rms(transformation, anchor_points, batch_size, return_per_anchor=False):
+    input_rms, _, per_anchor_rms = measure_transformation(transformation, anchor_points, batch_size, return_per_anchor)
+    return (input_rms, per_anchor_rms) if return_per_anchor else input_rms
+
+
+def transformation_path(transformation_type, configured_intensity, strength):
+    factor_transformations = {"isotropic_scale", "aspect_ratio_deformation", "contrast", "gamma_correction"}
+
+    if transformation_type in factor_transformations:
+        direction = 1 if configured_intensity > 1 else -1
+        return math.exp(direction * strength)
+
+    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+        return strength
+
+    if transformation_type == "gaussian_blur":
+        return strength
+
+    direction = 1 if configured_intensity > 0 else -1
+    return direction * strength
+
+
+def parameter_strength(transformation_type, intensity):
+    if not math.isfinite(intensity):
+        raise ValueError(f"Transformation {transformation_type} has a nonfinite intensity.")
+
+    if transformation_type in {"isotropic_scale", "aspect_ratio_deformation", "contrast", "gamma_correction"}:
+        if intensity <= 0 or intensity == 1:
+            raise ValueError(f"Transformation {transformation_type} needs a positive, non-identity factor to define its direction.")
+        return abs(math.log(intensity))
+
+    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+        if not 0 < intensity <= 1:
+            raise ValueError(f"Transformation {transformation_type} needs an intensity in (0, 1].")
+        return intensity
+
+    if transformation_type == "gaussian_blur":
+        if intensity < 0:
+            raise ValueError("Transformation gaussian_blur needs a nonnegative intensity.")
+        return intensity
+
+    if intensity == 0:
+        raise ValueError(f"Transformation {transformation_type} needs a nonzero intensity to define its direction.")
+
+    return abs(intensity)
+
+
+def transformation_strength_limit(transformation_type, anchor_points):
+    """End the unique path before periodic repetition or spatial collapse.
+
+    Geometric paths retain at least two sampled pixels, blur uses the largest non-repeating reflected kernel, and contrast retains one 8-bit intensity level.
+    """
+    height, width = anchor_points.shape[-2:]
+    minimum_size = min(height, width)
+
+    if transformation_type == "rotation":
+        return 180.0
+    if transformation_type == "horizontal_translation":
+        return float(width - 1)
+    if transformation_type == "vertical_translation":
+        return float(height - 1)
+    if transformation_type == "diagonal_shear":
+        return 2 * (width - 1) / max(height - 1, 1)
+    if transformation_type == "vertical_shear":
+        return 2 * (height - 1) / max(width - 1, 1)
+    if transformation_type in {"isotropic_scale", "aspect_ratio_deformation"}:
+        return math.log(max(minimum_size / 2, 1.0))
+    if transformation_type in {"contrast", "gamma_correction"}:
+        return math.log(255.0)
+    if transformation_type == "stroke_thickness":
+        return 1.0
+    if transformation_type == "gaussian_blur":
+        return (minimum_size - 1) / 3
+    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+        return 1.0
+    if transformation_type == "horizontal_wave":
+        return float(width - 1)
+    if transformation_type == "vertical_wave":
+        return float(height - 1)
+    if transformation_type == "perspective":
+        return 1 - 2 / minimum_size
+
+    raise ValueError(f"Unsupported dataset transformation: {transformation_type}")
+
+
+def per_anchor_rms_summary(per_anchor_rms):
+    quantiles = torch.quantile(per_anchor_rms, torch.tensor([0.25, 0.5, 0.75]))
+    return {
+        "min": per_anchor_rms.min().item(),
+        "q25": quantiles[0].item(),
+        "median": quantiles[1].item(),
+        "q75": quantiles[2].item(),
+        "max": per_anchor_rms.max().item(),
+        "mean": per_anchor_rms.mean().item(),
+        "std": per_anchor_rms.std(unbiased=False).item(),
+    }
+
+
+def calibrate_transformation(transformation_config, anchor_points, target_input_rms, batch_size, search_limit=None):
     from .dataset_utils import create_dataset_transformation
 
-    transformation_configs = config["lora"]["regularizer"]["transformations"]
+    transformation_type = transformation_config["name"].lower()
+    configured_intensity = float(transformation_config["intensity"])
+    direction_seed = int(transformation_config.get("direction_seed", 0))
+    initial_strength = parameter_strength(transformation_type, configured_intensity)
+
+    if transformation_type.startswith("random_direction_"):
+        resolved_intensity = target_input_rms if configured_intensity > 0 else -target_input_rms
+        transformation = create_dataset_transformation(transformation_type, resolved_intensity, direction_seed)
+        achieved_rms, per_anchor_rms = measure_input_rms(transformation, anchor_points, batch_size, return_per_anchor=True)
+        search_limit = target_input_rms
+    else:
+        search_limit = search_limit or transformation_strength_limit(transformation_type, anchor_points)
+        search_strengths = [search_limit * index / CALIBRATION_SEARCH_STEPS for index in range(CALIBRATION_SEARCH_STEPS + 1)]
+
+        if 0 < initial_strength < search_limit:
+            search_strengths.append(initial_strength)
+
+        search_strengths = sorted(set(search_strengths))
+        previous_strength, previous_rms = 0.0, 0.0
+        measured_rms = [previous_rms]
+        bracket = None
+
+        for strength in search_strengths[1:]:
+            intensity = transformation_path(transformation_type, configured_intensity, strength)
+            transformation = create_dataset_transformation(transformation_type, intensity, direction_seed)
+            input_rms = measure_input_rms(transformation, anchor_points, batch_size)
+
+            if not math.isfinite(input_rms):
+                raise ValueError(f"Transformation {transformation_type} produced a nonfinite RMS displacement.")
+
+            measured_rms.append(input_rms)
+
+            if (previous_rms - target_input_rms) * (input_rms - target_input_rms) <= 0:
+                bracket = [previous_strength, previous_rms, strength, input_rms]
+                break
+
+            previous_strength, previous_rms = strength, input_rms
+
+        if bracket is None:
+            reachable_min, reachable_max = min(measured_rms), max(measured_rms)
+            raise ValueError(f"Transformation {transformation_type} cannot reach target_input_rms={target_input_rms:g}; measured reachable RMS range is [{reachable_min:g}, {reachable_max:g}].")
+
+        lower_strength, lower_rms, upper_strength, upper_rms = bracket
+        best_strength, best_rms = min([(lower_strength, lower_rms), (upper_strength, upper_rms)], key=lambda value: abs(value[1] - target_input_rms))
+
+        for _ in range(60):
+            middle_strength = (lower_strength + upper_strength) / 2
+
+            if middle_strength == lower_strength or middle_strength == upper_strength:
+                break
+
+            intensity = transformation_path(transformation_type, configured_intensity, middle_strength)
+            transformation = create_dataset_transformation(transformation_type, intensity, direction_seed)
+            middle_rms = measure_input_rms(transformation, anchor_points, batch_size)
+
+            if abs(middle_rms - target_input_rms) < abs(best_rms - target_input_rms):
+                best_strength, best_rms = middle_strength, middle_rms
+
+            if math.isclose(best_rms, target_input_rms, rel_tol=RMS_RELATIVE_TOLERANCE, abs_tol=RMS_ABSOLUTE_TOLERANCE):
+                break
+
+            if (lower_rms - target_input_rms) * (middle_rms - target_input_rms) <= 0:
+                upper_strength, upper_rms = middle_strength, middle_rms
+            else:
+                lower_strength, lower_rms = middle_strength, middle_rms
+
+        resolved_intensity = transformation_path(transformation_type, configured_intensity, best_strength)
+        transformation = create_dataset_transformation(transformation_type, resolved_intensity, direction_seed)
+        achieved_rms, per_anchor_rms = measure_input_rms(transformation, anchor_points, batch_size, return_per_anchor=True)
+
+    if not math.isfinite(achieved_rms) or achieved_rms <= INPUT_SCALE_FLOOR:
+        raise ValueError(f"Transformation {transformation_type} produced a zero, nonfinite or numerically unresolved perturbation.")
+
+    if not math.isclose(achieved_rms, target_input_rms, rel_tol=RMS_RELATIVE_TOLERANCE, abs_tol=RMS_ABSOLUTE_TOLERANCE):
+        raise ValueError(f"Transformation {transformation_type} resolved to RMS {achieved_rms:g}, not target_input_rms={target_input_rms:g}.")
+
+    metadata = {
+        "name": transformation_type,
+        "configured_intensity": configured_intensity,
+        "resolved_intensity": transformation.intensity,
+        "resolved_strength": transformation.finite_difference_step,
+        "target_input_rms": target_input_rms,
+        "achieved_input_rms": achieved_rms,
+        "direction": 1 if transformation.intensity > (1 if transformation_type in {"isotropic_scale", "aspect_ratio_deformation", "contrast", "gamma_correction"} else 0) else -1,
+        "search_strength_limit": search_limit,
+        "per_anchor_input_rms": per_anchor_rms_summary(per_anchor_rms),
+    }
+
+    if transformation_type.startswith("random_direction_"):
+        metadata["direction_seed"] = direction_seed
+        metadata["effective_direction_seed"] = direction_seed + transformation.direction_index
+
+    return transformation, metadata
+
+
+def find_maximum_strength(transformation_config, anchor_points, batch_size):
+    from .dataset_utils import create_dataset_transformation
+
+    transformation_type = transformation_config["name"].lower()
+    configured_intensity = float(transformation_config["intensity"])
+    direction_seed = int(transformation_config.get("direction_seed", 0))
+
+    if transformation_type.startswith("random_direction_"):
+        raise ValueError(f"Transformation {transformation_type} has no finite maximum because its additive path is unbounded; use an explicit intensity instead.")
+
+    parameter_strength(transformation_type, configured_intensity)
+    search_limit = transformation_strength_limit(transformation_type, anchor_points)
+    measurements = {}
+
+    def evaluate(strength):
+        if strength not in measurements:
+            intensity = transformation_path(transformation_type, configured_intensity, strength)
+            transformation = create_dataset_transformation(transformation_type, intensity, direction_seed)
+            input_rms, output_variation, _ = measure_transformation(transformation, anchor_points, batch_size)
+
+            if not math.isfinite(input_rms) or not math.isfinite(output_variation):
+                raise ValueError(f"Transformation {transformation_type} produced a nonfinite calibration measurement.")
+
+            measurements[strength] = input_rms, output_variation
+
+        return measurements[strength]
+
+    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+        maximum_input_rms, output_variation = evaluate(search_limit)
+
+        if output_variation <= INPUT_SCALE_FLOOR:
+            raise ValueError(f"Transformation {transformation_type} has a numerically degenerate endpoint.")
+
+        return search_limit, maximum_input_rms
+
+    search_strengths = [search_limit * index / CALIBRATION_SEARCH_STEPS for index in range(CALIBRATION_SEARCH_STEPS + 1)]
+
+    for strength in search_strengths:
+        evaluate(strength)
+
+    for _ in range(MAXIMUM_REFINEMENT_STEPS):
+        valid_strengths = [strength for strength in search_strengths if strength > 0 and measurements[strength][1] > INPUT_SCALE_FLOOR]
+
+        if not valid_strengths:
+            raise ValueError(f"Transformation {transformation_type} has no numerically non-degenerate result in its valid range.")
+
+        best_rms = max(measurements[strength][0] for strength in valid_strengths)
+        maximum_tolerance = max(RMS_ABSOLUTE_TOLERANCE, best_rms * MAXIMUM_RELATIVE_TOLERANCE)
+        best_strength = min(strength for strength in valid_strengths if measurements[strength][0] >= best_rms - maximum_tolerance)
+        best_index = search_strengths.index(best_strength)
+        lower_strength = search_strengths[max(0, best_index - 1)]
+        upper_strength = search_strengths[min(len(search_strengths) - 1, best_index + 1)]
+        search_strengths = [lower_strength + (upper_strength - lower_strength) * index / 8 for index in range(9)]
+
+        for strength in search_strengths:
+            evaluate(strength)
+
+    valid_measurements = [(strength, input_rms) for strength, (input_rms, output_variation) in measurements.items() if strength > 0 and output_variation > INPUT_SCALE_FLOOR]
+    maximum_input_rms = max(input_rms for _, input_rms in valid_measurements)
+    maximum_tolerance = max(RMS_ABSOLUTE_TOLERANCE, maximum_input_rms * MAXIMUM_RELATIVE_TOLERANCE)
+    maximum_strength = min(strength for strength, input_rms in valid_measurements if input_rms >= maximum_input_rms - maximum_tolerance)
+    return maximum_strength, measurements[maximum_strength][0]
+
+
+def calibrate_relative_transformation(transformation_config, anchor_points, relative_strength, batch_size):
+    maximum_strength, maximum_input_rms = find_maximum_strength(transformation_config, anchor_points, batch_size)
+    target_input_rms = relative_strength * maximum_input_rms
+    transformation, metadata = calibrate_transformation(transformation_config, anchor_points, target_input_rms, batch_size, maximum_strength)
+    metadata["transformation_strength"] = relative_strength
+    metadata["maximum_strength"] = maximum_strength
+    metadata["maximum_intensity"] = transformation_path(metadata["name"], metadata["configured_intensity"], maximum_strength)
+    metadata["maximum_input_rms"] = maximum_input_rms
+    metadata["relative_input_rms"] = metadata["achieved_input_rms"] / maximum_input_rms
+    return transformation, metadata
+
+
+def create_regularizer_transformations(config, device=None, anchor_points=None):
+    from .dataset_utils import TRANSFORMATION_IMPLEMENTATION_VERSION, create_dataset_transformation
+
+    regularizer_config = config["lora"]["regularizer"]
+    transformation_configs = regularizer_config["transformations"]
+    target_input_rms = regularizer_config.get("target_input_rms")
+    relative_strength = regularizer_config.get("transformation_strength")
     transformation_functions = []
     intensities = []
+    regularizer_config["transformation_implementation_version"] = TRANSFORMATION_IMPLEMENTATION_VERSION
 
-    for transformation_config in transformation_configs:
-        transformation_type = transformation_config["name"]
-        intensity = float(transformation_config["intensity"])
-        direction_seed = int(transformation_config.get("direction_seed", 0))
-        transformation = create_dataset_transformation(transformation_type, intensity, direction_seed)
+    if target_input_rms is not None and relative_strength is not None:
+        raise ValueError("Use either target_input_rms or transformation_strength, not both.")
 
-        if transformation.finite_difference_step == 0:
-            raise ValueError("A regularizer transformation must differ from the identity transformation.")
+    if target_input_rms is not None or relative_strength is not None:
+        calibration_mode = "target_input_rms" if target_input_rms is not None else "transformation_strength"
 
-        transformation_functions.append(transformation)
-        intensities.append(transformation.finite_difference_step)
+        if anchor_points is None or len(anchor_points) == 0:
+            raise ValueError(f"Anchor points are required to calibrate {calibration_mode}.")
+
+        calibration_batch_size = int(regularizer_config.get("calibration_batch_size", 100))
+
+        if calibration_batch_size <= 0:
+            raise ValueError("calibration_batch_size must be positive.")
+
+        if target_input_rms is not None:
+            target_input_rms = float(target_input_rms)
+            regularizer_config["target_input_rms"] = target_input_rms
+
+            if not math.isfinite(target_input_rms) or target_input_rms <= INPUT_SCALE_FLOOR:
+                raise ValueError(f"target_input_rms must be finite and greater than {INPUT_SCALE_FLOOR:g}.")
+        else:
+            relative_strength = float(relative_strength)
+            regularizer_config["transformation_strength"] = relative_strength
+
+            if not math.isfinite(relative_strength) or not 0 < relative_strength <= 1:
+                raise ValueError("transformation_strength must be finite and in (0, 1].")
+
+        resolved_transformations = []
+
+        for transformation_config in transformation_configs:
+            if target_input_rms is not None:
+                transformation, metadata = calibrate_transformation(transformation_config, anchor_points, target_input_rms, calibration_batch_size)
+            else:
+                transformation, metadata = calibrate_relative_transformation(transformation_config, anchor_points, relative_strength, calibration_batch_size)
+
+            transformation_functions.append(transformation)
+            intensities.append(transformation.finite_difference_step)
+            resolved_transformations.append(metadata)
+
+        regularizer_config["calibration"] = {
+            calibration_mode: target_input_rms if target_input_rms is not None else relative_strength,
+            "relative_tolerance": RMS_RELATIVE_TOLERANCE,
+            "absolute_tolerance": RMS_ABSOLUTE_TOLERANCE,
+            "maximum_relative_tolerance": MAXIMUM_RELATIVE_TOLERANCE,
+            "maximum_definition": "Earliest maximum anchor RMS on the non-redundant, numerically non-degenerate transformation path.",
+            "transformation_implementation_version": TRANSFORMATION_IMPLEMENTATION_VERSION,
+            "transformations": resolved_transformations,
+        }
+    else:
+        regularizer_config.pop("calibration", None)
+
+        for transformation_config in transformation_configs:
+            transformation_type = transformation_config["name"]
+            intensity = float(transformation_config["intensity"])
+            direction_seed = int(transformation_config.get("direction_seed", 0))
+            transformation = create_dataset_transformation(transformation_type, intensity, direction_seed)
+
+            if not math.isfinite(transformation.finite_difference_step) or transformation.finite_difference_step == 0:
+                raise ValueError("A regularizer transformation must differ from the identity transformation.")
+
+            transformation_functions.append(transformation)
+            intensities.append(transformation.finite_difference_step)
 
     if not transformation_functions:
         raise ValueError("At least one regularizer transformation is required.")
