@@ -91,8 +91,14 @@ class AdaptationPlotter:
             for transformation in regularizer_config["transformations"]:
                 transformations.append(f"{transformation['name']}: {float(transformation['intensity']):g}")
 
+            mode = regularizer_config.get("mode", "output_gram")
+            mode_summary = f"mode: {mode}"
+
+            if mode != "output_gram":
+                mode_summary += f"  |  response weight: {float(regularizer_config.get('response_weight', 1.0)):g}  |  decoder weight: {float(regularizer_config.get('decoder_weight', 0.0)):g}"
+
             midpoint = (len(transformations) + 1) // 2
-            first_line = f"TF regularizer  |  {'; '.join(transformations[:midpoint])}"
+            first_line = f"TF regularizer  |  {mode_summary}  |  {'; '.join(transformations[:midpoint])}"
             second_line = f"{'; '.join(transformations[midpoint:])}  |  eta: {float(regularizer_config['eta']):g}  |  anchor points: {int(regularizer_config['num_anchor_points'])}"
             summary = f"{first_line}\n{second_line}" if transformations[midpoint:] else first_line
 

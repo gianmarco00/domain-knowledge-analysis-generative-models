@@ -1,54 +1,24 @@
 base_config: config/lora_vae_mnist.yaml
 
 ablation:
-  output_dir: ablations/vae_mnist_rotated_mnist
+  output_dir: ablations/vae_mnist_rotated_mnist_output_gram
   parallel_models: 2
 
-  seeds: [42, 43]
-  eta_values: [0.0, 10.0, 100.0, 1000.0]
+  regularizer_mode: output_gram
+  seeds: [42]
+  eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0]
+  m_values: [5, 10, 20]
+  s_values: [0.01, 0.1, 0.5]
+  # Custom runs accept seed, eta, mode, s and an ordered list of transformation names.
+  extra_runs: []
+  target_gain_fraction: 0.99
 
-  transformation_modes:
-    - semantic_perturbations
-    - random_perturbations
-    - both
-
-  m_values:
-    semantic_perturbations: [5, 10]
-    random_perturbations: [5, 10]
-    both: [20]
-
-  max_subsets_per_m: 5
-  subset_selection_seed: 123
-
-  extra_runs:
-    - seed: 42
-      eta: 1000.0
-      mode: semantic_no_rotation
-      transformations: [horizontal_translation, vertical_translation, isotropic_scale, diagonal_shear, contrast]
-    - seed: 42
-      eta: 10000.0
-      mode: semantic_no_rotation
-      transformations: [horizontal_translation, vertical_translation, isotropic_scale, diagonal_shear, contrast]
-    - seed: 42
-      eta: 10000.0
-      mode: semantic_perturbations
-      transformations: [rotation, horizontal_translation, vertical_translation, isotropic_scale, aspect_ratio_deformation, diagonal_shear, vertical_shear, stroke_thickness, gaussian_blur, contrast]
-
-  evaluation_mode: both
-  eta_selection_mode: both
-  eta_selection_m: 20
-  target_gain_fraction: 0.95
-
-  gram_num_images: 300
-  gram_batch_size: 100
-  qualitative_seed: 42
   visual_seed: 123
   num_qualitative_images: 6
   num_response_images: 2
-  response_transformations: [rotation, horizontal_translation, isotropic_scale, stroke_thickness]
+  response_transformations: [horizontal_translation, vertical_translation, isotropic_scale, aspect_ratio_deformation]
 
   semantic_transformations:
-    - {name: rotation, intensity: 15.0}
     - {name: horizontal_translation, intensity: 2}
     - {name: vertical_translation, intensity: 2}
     - {name: isotropic_scale, intensity: 1.10}
@@ -58,19 +28,14 @@ ablation:
     - {name: stroke_thickness, intensity: 0.5}
     - {name: gaussian_blur, intensity: 0.7}
     - {name: contrast, intensity: 1.2}
-    - {name: horizontal_flip, intensity: 0.5}
-    - {name: vertical_flip, intensity: 0.5}
+    - {name: rotation, intensity: 15.0}
     - {name: gamma_correction, intensity: 1.2}
     - {name: binarization, intensity: 0.5}
-    - {name: pixelation, intensity: 0.5}
-    - {name: horizontal_motion_blur, intensity: 0.5}
-    - {name: vertical_motion_blur, intensity: 0.5}
     - {name: horizontal_wave, intensity: 2.0}
     - {name: vertical_wave, intensity: 2.0}
     - {name: perspective, intensity: 0.2}
-
-  random_perturbation:
-    name: perturbation
-    num_transformations: 10
-    intensity: 0.05
-    direction_seed: 5000
+    - {name: vertical_perspective, intensity: 0.2}
+    - {name: swirl, intensity: 0.5}
+    - {name: radial_bulge, intensity: 0.5}
+    - {name: sharpen, intensity: 0.5}
+    - {name: vignette, intensity: 0.5}

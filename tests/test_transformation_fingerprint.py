@@ -25,12 +25,51 @@ class DummyModel(torch.nn.Module):
 class DummyLoRAManager:
     def __init__(self, model):
         self.model = model
+        self.adapters_enabled = True
 
     def disable_adapters(self):
         self.model.adapters_enabled = False
+        self.adapters_enabled = False
 
     def enable_adapters(self):
         self.model.adapters_enabled = True
+        self.adapters_enabled = True
+
+
+class DummyVAE(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder_delta = torch.nn.Parameter(torch.tensor(0.1))
+        self.decoder_delta = torch.nn.Parameter(torch.tensor(0.1))
+        self.encoder_params = {"latent_dim": 2}
+        self.decoder_distribution_name = "bernoulli"
+        self.adapters_enabled = True
+
+    def encoder(self, x):
+        x = x.flatten(start_dim=1)
+        mean = x[:, :2]
+        log_variance = 0.2 * x[:, 2:]
+
+        if self.adapters_enabled:
+            mean = mean + self.encoder_delta * x[:, 2:]
+            log_variance = log_variance + self.encoder_delta * x[:, :2]
+
+        return mean, log_variance
+
+    def decoder(self, z):
+        logits = torch.stack([z[:, 0], z[:, 1], z[:, 0] - z[:, 1], z[:, 0] + z[:, 1]], dim=1)
+
+        if self.adapters_enabled:
+            logits = logits + self.decoder_delta * logits.square()
+
+        return logits
+
+    def decoder_distribution(self, logits, decoder_distribution_name):
+        return torch.sigmoid(logits)
+
+    def deterministic_forward(self, x):
+        mean, _ = self.encoder(x)
+        return self.decoder_distribution(self.decoder(mean), self.decoder_distribution_name)
 
 
 class AddPattern:
@@ -83,6 +122,13 @@ def full_calibration(model, lora_manager, transformations, anchor_points):
         model.train()
 
     return input_scale_matrix, gram_matrices
+
+
+def make_encoder_regularizer(mode, calibration_batch_size=2, decoder_weight=0.0, decoder_seed=0):
+    anchor_points, transformations = make_inputs()
+    model = DummyVAE()
+    regularizer = TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points, anchor_batch_size=len(anchor_points), calibration_batch_size=calibration_batch_size, mode=mode, response_weight=2.0, decoder_weight=decoder_weight, decoder_seed=decoder_seed)
+    return model, regularizer
 
 
 def test_batched_calibration_matches_original_full_calibration():
@@ -200,6 +246,84 @@ def test_regularizer_rejects_unresolved_input_scale():
 
     with pytest.raises(ValueError, match="greater than 1e-6"):
         TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points)
+
+
+def test_encoder_representation_contains_mean_and_standard_deviation():
+    model, regularizer = make_encoder_regularizer("encoder_response")
+    mean, log_variance = model.encoder(regularizer.x)
+    expected = torch.cat([mean, torch.exp(0.5 * log_variance)], dim=-1)
+
+    torch.testing.assert_close(regularizer.model_representation(regularizer.x), expected)
+
+
+def test_encoder_response_loss_matches_its_three_terms():
+    model, regularizer = make_encoder_regularizer("encoder_response", decoder_weight=3.0)
+    regularizer.anchor_indices = torch.arange(regularizer.num_anchor_points)
+    regularizer.anchor_position = 0
+    encoder_output, response = regularizer.model_response(return_original=True)
+    geometry = regularizer.transformation_geometry(response)
+    latents = regularizer.source_latents
+    decoder_output = regularizer.decoder_output(latents.flatten(0, 1)).reshape(regularizer.num_anchor_points, 3, -1)
+    encoder_loss = torch.square(encoder_output - regularizer.source_encoder_outputs).mean()
+    response_loss = torch.square(geometry - regularizer.source_transformation_geometries).mean()
+    decoder_loss = torch.square(decoder_output - regularizer.source_decoder_outputs).mean()
+    expected = encoder_loss + 2.0 * response_loss + 3.0 * decoder_loss
+
+    torch.testing.assert_close(regularizer(), expected)
+
+
+def test_encoder_response_gives_the_exact_transformed_posterior_error_identity():
+    _, regularizer = make_encoder_regularizer("encoder_response")
+    encoder_output, response = regularizer.model_response(return_original=True)
+    current_geometry = regularizer.transformation_geometry(response)
+    source_geometry = regularizer.source_transformation_geometries
+    source_encoder_output = regularizer.source_encoder_outputs
+    scales = regularizer.input_scales.view(1, -1, 1)
+    transformed_error = encoder_output.unsqueeze(1) + response - source_encoder_output.unsqueeze(1) - scales * source_geometry
+    expected = (encoder_output - source_encoder_output).unsqueeze(1) + scales * (current_geometry - source_geometry)
+
+    torch.testing.assert_close(transformed_error, expected)
+
+
+def test_encoder_gram_uses_normalized_responses_without_trace_normalization():
+    _, regularizer = make_encoder_regularizer("encoder_gram")
+    response = regularizer.model_response()
+    normalized_response = response / regularizer.input_scales.view(1, -1, 1)
+    expected = (normalized_response @ normalized_response.transpose(-1, -2)) / normalized_response.shape[-1]
+
+    torch.testing.assert_close(regularizer.transformation_geometry(response), expected)
+    torch.testing.assert_close(regularizer.transformation_geometry(2 * response), 4 * expected)
+
+
+def test_decoder_source_codes_do_not_depend_on_calibration_batch_size():
+    _, full_batch = make_encoder_regularizer("encoder_response", calibration_batch_size=7, decoder_weight=1.0, decoder_seed=13)
+    _, small_batches = make_encoder_regularizer("encoder_response", calibration_batch_size=2, decoder_weight=1.0, decoder_seed=13)
+
+    torch.testing.assert_close(full_batch.source_encoder_outputs, small_batches.source_encoder_outputs)
+    torch.testing.assert_close(full_batch.source_transformation_geometries, small_batches.source_transformation_geometries)
+    torch.testing.assert_close(full_batch.source_latents, small_batches.source_latents)
+    torch.testing.assert_close(full_batch.source_decoder_outputs, small_batches.source_decoder_outputs)
+
+
+def test_encoder_response_loss_reaches_encoder_and_decoder_adapters():
+    model, regularizer = make_encoder_regularizer("encoder_response", decoder_weight=1.0)
+
+    regularizer().backward()
+
+    assert torch.isfinite(model.encoder_delta.grad)
+    assert torch.isfinite(model.decoder_delta.grad)
+    assert model.training
+    assert model.adapters_enabled
+
+
+@pytest.mark.parametrize("argument, value, message", [("mode", "unknown", "mode"), ("response_weight", -1.0, "response_weight"), ("decoder_weight", float("nan"), "decoder_weight")])
+def test_regularizer_rejects_invalid_modes_and_weights(argument, value, message):
+    anchor_points, transformations = make_inputs()
+    model = DummyVAE()
+    arguments = {argument: value}
+
+    with pytest.raises(ValueError, match=message):
+        TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points, **arguments)
 
 
 def test_vae_deterministic_forward_returns_differentiable_pixel_probabilities():

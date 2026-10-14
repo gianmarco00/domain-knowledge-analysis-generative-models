@@ -7,9 +7,8 @@ import torch
 
 from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.experiments.experiment import Experiment
-from domain_knowledge_analysis.experiments.ablation_utils import create_transformation_families, generate_model_runs, save_rows, save_yaml, select_eta, select_model
+from domain_knowledge_analysis.experiments.ablation_utils import generate_model_runs, save_rows, save_yaml, select_best_models
 from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
-from domain_knowledge_analysis.regularizers import TFRegularizer
 from domain_knowledge_analysis.scoring import AdaptationScorer
 
 
@@ -38,7 +37,6 @@ class Ablation:
         self.output_dir = self.repo_root / Path(self.ablation_config["output_dir"])
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.evaluation_families = create_transformation_families(self.ablation_config, self.ablation_config["evaluation_mode"])
         self.runs = generate_model_runs(self.base_config, self.ablation_config, self.output_dir)
 
     def run(self):
@@ -59,7 +57,7 @@ class Ablation:
                 "eta": run["eta"],
                 "mode": run["mode"],
                 "m": run["m"],
-                "subset_index": run["subset_index"],
+                "s": run["s"],
                 "subset": run["subset"],
                 "extra_run": run["extra_run"],
                 **metrics,
@@ -69,26 +67,24 @@ class Ablation:
             experiment.logger.close()
             del experiment
 
-        eta_star, eta_summary = select_eta(
-            results,
-            self.ablation_config["eta_values"],
-            self.ablation_config["eta_selection_mode"],
-            self.ablation_config["eta_selection_m"],
-            self.ablation_config["target_gain_fraction"],
-        )
-        selected_model, model_summary = select_model(results, self.ablation_config["target_gain_fraction"])
-
-        save_rows(eta_summary, self.output_dir / "results" / "eta_selection.csv")
-        save_rows(model_summary, self.output_dir / "results" / "model_selection.csv")
-        save_yaml({key: selected_model[key] for key in ["mode", "m", "eta", "validation_target_gain", "validation_source_degradation"]}, self.output_dir / "results" / "selected_model.yaml")
+        best_models, required_target_gain = select_best_models(results, self.ablation_config["target_gain_fraction"])
+        best_model_rows = [{"selection": selection, "required_target_gain": required_target_gain, **model} for selection, model in best_models.items()]
+        selected_model = best_models["best_overall"]
+        save_rows(best_model_rows, self.output_dir / "results" / "best_models.csv")
+        save_yaml({"target_gain_fraction": self.ablation_config["target_gain_fraction"], "required_target_gain": required_target_gain, "models": {selection: dict(model) for selection, model in best_models.items()}}, self.output_dir / "results" / "best_models.yaml")
 
         plotter = AblationPlotter(self.output_dir, self.ablation_config)
-        plotter.plot_figure_1(results, selected_model)
-        plotter.plot_figure_2(results, selected_model)
-        plotter.plot_heatmaps(results)
+        plotter.plot_figure_1(results)
+        plotter.plot_figure_2(results)
+        plotter.plot_figure_3(results)
+        plotter.plot_figure_4(results)
         plotter.plot_qualitative(self.create_qualitative_results(selected_model))
 
-        print(f"\nSelected model: {selected_model['mode']}, M={selected_model['m']}, eta={selected_model['eta']:g}")
+        print("\nBest regularized models:")
+
+        for selection, model in best_models.items():
+            print(f"{selection}: eta={model['eta']:g}, M={model['m']}, s={model['s']:g}")
+
         print(f"Results saved in: {self.output_dir}")
 
         return results
@@ -148,12 +144,9 @@ class Ablation:
 
         validation_metrics = self.score_split(experiment, target_validation_dataloader, source_validation_dataloader)
         test_metrics = self.score_split(experiment, target_test_dataloader, source_test_dataloader)
-        gram_error = self.score_gram_error(experiment, source_test_dataloader)
-
         return {
             **{f"validation_{name}": value for name, value in validation_metrics.items()},
             **{f"test_{name}": value for name, value in test_metrics.items()},
-            "held_out_gram_error": gram_error,
         }
 
     def score_split(self, experiment, target_dataloader, source_dataloader):
@@ -174,43 +167,12 @@ class Ablation:
             "source_degradation": adapted_source_mse - base_source_mse,
         }
 
-    def score_gram_error(self, experiment, source_dataloader):
-        num_images = int(self.ablation_config["gram_num_images"])
-        batch_size = int(self.ablation_config["gram_batch_size"])
-        images = []
-        num_selected_images = 0
-
-        for batch in source_dataloader:
-            images.append(batch[0])
-            num_selected_images += len(batch[0])
-
-            if num_selected_images >= num_images:
-                break
-
-        images = torch.cat(images)[:num_images].to(experiment.device)
-        evaluation_config = deepcopy(experiment.config)
-        evaluation_config["lora"]["regularizer"] = {
-            "eta": 1.0,
-            "num_anchor_points": num_images,
-            "transformations": deepcopy(self.evaluation_families),
-        }
-
-        transformations = utils.create_regularizer_transformations(evaluation_config, experiment.device)
-        regularizer = TFRegularizer(experiment.model, experiment.lora_manager, transformations, images, anchor_batch_size=batch_size, calibration_batch_size=batch_size)
-
-        with torch.no_grad():
-            adapted_grams = regularizer.gram_matrix_batched(batch_size)
-            source_grams = regularizer.source_gram_matrices
-            gram_error = torch.square(adapted_grams - source_grams).mean(dim=(-2, -1)).mean()
-
-        return gram_error.item()
-
     def create_qualitative_results(self, selected_model):
-        seed = int(self.ablation_config["qualitative_seed"])
+        seed = int(selected_model["seed"])
         num_images = int(self.ablation_config["num_qualitative_images"])
 
         ordinary_run = next(run for run in self.runs if run["seed"] == seed and run["eta"] == 0)
-        regularized_run = next(run for run in self.runs if run["seed"] == seed and run["eta"] == selected_model["eta"] and run["mode"] == selected_model["mode"] and run["m"] == selected_model["m"])
+        regularized_run = next(run for run in self.runs if run["model_id"] == selected_model["model_id"])
 
         ordinary_experiment = self.load_or_train(ordinary_run)
         regularized_experiment = self.load_or_train(regularized_run)
@@ -257,13 +219,19 @@ class Ablation:
         transformation_configs = [transformation for transformation in regularized_experiment.config["lora"]["regularizer"]["transformations"] if transformation["name"] in transformation_names]
         response_config = deepcopy(regularized_experiment.config)
 
-        resolved_transformations = regularized_experiment.config["lora"]["regularizer"].get("calibration", {}).get("transformations", [])
-        resolved_intensities = {transformation["name"]: transformation["resolved_intensity"] for transformation in resolved_transformations}
-        transformation_configs = [{**transformation, "intensity": resolved_intensities.get(transformation["name"], transformation["intensity"])} for transformation in transformation_configs]
+        if not transformation_configs:
+            transformation_configs = regularized_experiment.config["lora"]["regularizer"]["transformations"][:4]
+
         response_config["lora"]["regularizer"]["transformations"] = transformation_configs
-        response_config["lora"]["regularizer"].pop("target_input_rms", None)
-        response_config["lora"]["regularizer"].pop("transformation_strength", None)
-        transformation_functions, _ = utils.create_regularizer_transformations(response_config, ordinary_experiment.device)
+
+        if "target_input_rms" in response_config["lora"]["regularizer"] or "transformation_strength" in response_config["lora"]["regularizer"]:
+            anchor_points = utils.select_anchor_points(response_config, response_config["dataset"]["name"], ordinary_experiment.device)
+            transformation_functions, _ = utils.create_regularizer_transformations(response_config, ordinary_experiment.device, anchor_points)
+        else:
+            transformation_functions, _ = utils.create_regularizer_transformations(response_config, ordinary_experiment.device)
+
+        resolved_transformations = response_config["lora"]["regularizer"].get("calibration", {}).get("transformations", [])
+        resolved_intensities = {transformation["name"]: transformation["resolved_intensity"] for transformation in resolved_transformations}
         images = source_images[:num_images].to(ordinary_experiment.device)
         transformed_images = torch.stack([transformation(images) for transformation in transformation_functions])
 
@@ -277,7 +245,7 @@ class Ablation:
 
             return (transformed_output - original_output.unsqueeze(0)).cpu()
 
-        labels = [f"{transformation['name'].replace('_', ' ')} ({float(transformation['intensity']):g})" for transformation in transformation_configs]
+        labels = [f"{transformation['name'].replace('_', ' ')} ({float(resolved_intensities.get(transformation['name'], transformation['intensity'])):g})" for transformation in transformation_configs]
 
         return {
             "input": images.cpu(),

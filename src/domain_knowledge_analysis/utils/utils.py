@@ -19,7 +19,8 @@ RMS_ABSOLUTE_TOLERANCE = 1e-8
 MAXIMUM_RELATIVE_TOLERANCE = 1e-6
 CALIBRATION_SEARCH_STEPS = 64
 MAXIMUM_REFINEMENT_STEPS = 4
-BOUNDED_BLEND_TRANSFORMATIONS = {"horizontal_flip", "vertical_flip", "binarization", "pixelation", "horizontal_motion_blur", "vertical_motion_blur"}
+LINEAR_BLEND_TRANSFORMATIONS = {"binarization", "sharpen", "vignette"}
+UNIT_INTERVAL_TRANSFORMATIONS = LINEAR_BLEND_TRANSFORMATIONS | {"swirl", "radial_bulge"}
 
 
 def load_config(config_path):
@@ -59,9 +60,15 @@ def build_run_name(config):
                 k = len(regularizer_config["transformations"])
                 target_input_rms = regularizer_config.get("target_input_rms")
                 transformation_strength = regularizer_config.get("transformation_strength")
+                regularizer_mode = regularizer_config.get("mode", "output_gram")
                 rms_name = f"_RMS_{float(target_input_rms):g}" if target_input_rms is not None else ""
                 strength_name = f"_S_{float(transformation_strength):g}" if transformation_strength is not None else ""
-                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}{rms_name}{strength_name}_TV_{TRANSFORMATION_IMPLEMENTATION_VERSION}_rank_{rank}_alpha_{alpha}"
+                mode_name = f"_RM_{regularizer_mode}"
+
+                if regularizer_mode != "output_gram":
+                    mode_name += f"_RW_{float(regularizer_config.get('response_weight', 1.0)):g}_DW_{float(regularizer_config.get('decoder_weight', 0.0)):g}_DS_{int(regularizer_config.get('decoder_seed', 0))}"
+
+                return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}{rms_name}{strength_name}{mode_name}_TV_{TRANSFORMATION_IMPLEMENTATION_VERSION}_rank_{rank}_alpha_{alpha}"
             
             return f"{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_rank_{rank}_alpha_{alpha}"
         
@@ -218,7 +225,7 @@ def transformation_path(transformation_type, configured_intensity, strength):
         direction = 1 if configured_intensity > 1 else -1
         return math.exp(direction * strength)
 
-    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+    if transformation_type in UNIT_INTERVAL_TRANSFORMATIONS:
         return strength
 
     if transformation_type == "gaussian_blur":
@@ -237,7 +244,7 @@ def parameter_strength(transformation_type, intensity):
             raise ValueError(f"Transformation {transformation_type} needs a positive, non-identity factor to define its direction.")
         return abs(math.log(intensity))
 
-    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+    if transformation_type in UNIT_INTERVAL_TRANSFORMATIONS:
         if not 0 < intensity <= 1:
             raise ValueError(f"Transformation {transformation_type} needs an intensity in (0, 1].")
         return intensity
@@ -279,13 +286,13 @@ def transformation_strength_limit(transformation_type, anchor_points):
         return 1.0
     if transformation_type == "gaussian_blur":
         return (minimum_size - 1) / 3
-    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+    if transformation_type in UNIT_INTERVAL_TRANSFORMATIONS:
         return 1.0
     if transformation_type == "horizontal_wave":
         return float(width - 1)
     if transformation_type == "vertical_wave":
         return float(height - 1)
-    if transformation_type == "perspective":
+    if transformation_type in {"perspective", "vertical_perspective"}:
         return 1 - 2 / minimum_size
 
     raise ValueError(f"Unsupported dataset transformation: {transformation_type}")
@@ -429,7 +436,7 @@ def find_maximum_strength(transformation_config, anchor_points, batch_size):
 
         return measurements[strength]
 
-    if transformation_type in BOUNDED_BLEND_TRANSFORMATIONS:
+    if transformation_type in LINEAR_BLEND_TRANSFORMATIONS:
         maximum_input_rms, output_variation = evaluate(search_limit)
 
         if output_variation <= INPUT_SCALE_FLOOR:

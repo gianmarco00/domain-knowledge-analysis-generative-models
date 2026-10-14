@@ -1,14 +1,29 @@
+import math
+
 import torch
 
 from domain_knowledge_analysis.utils.utils import INPUT_SCALE_FLOOR, RMS_ABSOLUTE_TOLERANCE, RMS_RELATIVE_TOLERANCE
 
 
 class TFRegularizer(torch.nn.Module):
-    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None):
+    VALID_MODES = {"output_gram", "encoder_response", "encoder_gram"}
+
+    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0):
         super().__init__()
+
+        if mode not in self.VALID_MODES:
+            raise ValueError(f"Regularizer mode must be one of {sorted(self.VALID_MODES)}.")
+        if not math.isfinite(response_weight) or response_weight < 0:
+            raise ValueError("Regularizer response_weight must be finite and nonnegative.")
+        if not math.isfinite(decoder_weight) or decoder_weight < 0:
+            raise ValueError("Regularizer decoder_weight must be finite and nonnegative.")
 
         self.model = model
         self.lora_manager = lora_manager
+        self.mode = mode
+        self.response_weight = float(response_weight)
+        self.decoder_weight = float(decoder_weight)
+        self.decoder_seed = int(decoder_seed)
         self.transformations_functions, _ = transformations
         self.num_transformations = len(self.transformations_functions)
         self.x = anchor_points
@@ -26,16 +41,50 @@ class TFRegularizer(torch.nn.Module):
         self.calibrate_input_scale()
 
         was_training = self.model.training
+        adapters_were_enabled = self.lora_manager.adapters_enabled
         self.model.eval()
         self.lora_manager.disable_adapters()
 
         with torch.no_grad():
-            self.source_gram_matrices = self.gram_matrix_batched(self.calibration_batch_size)
+            if self.mode == "output_gram":
+                self.source_gram_matrices = self.gram_matrix_batched(self.calibration_batch_size)
+            else:
+                source_encoder_outputs = []
+                source_transformation_geometries = []
+                source_latents = []
+                source_decoder_outputs = []
 
-        self.lora_manager.enable_adapters()
+                if self.decoder_weight > 0:
+                    latent_dim = self.model.encoder_params["latent_dim"]
+                    generator = torch.Generator(device="cpu")
+                    generator.manual_seed(self.decoder_seed)
+                    posterior_noise = torch.randn(self.num_anchor_points, latent_dim, generator=generator, dtype=self.x.dtype).to(self.x.device)
+                    prior_latents = torch.randn(self.num_anchor_points, latent_dim, generator=generator, dtype=self.x.dtype).to(self.x.device)
 
-        if was_training:
-            self.model.train()
+                for start in range(0, self.num_anchor_points, self.calibration_batch_size):
+                    end = min(start + self.calibration_batch_size, self.num_anchor_points)
+                    anchor_indices = torch.arange(start, end, device=self.x.device)
+                    encoder_output, response = self.model_response(anchor_indices, return_original=True)
+                    source_encoder_outputs.append(encoder_output)
+                    source_transformation_geometries.append(self.transformation_geometry(response))
+
+                    if self.decoder_weight > 0:
+                        mean, std = encoder_output.chunk(2, dim=-1)
+                        latents = torch.stack([mean, mean + std * posterior_noise[start:end], prior_latents[start:end]], dim=1)
+                        source_latents.append(latents)
+                        source_decoder_outputs.append(self.decoder_output(latents.flatten(0, 1)).reshape(end - start, 3, -1))
+
+                self.source_encoder_outputs = torch.cat(source_encoder_outputs)
+                self.source_transformation_geometries = torch.cat(source_transformation_geometries)
+
+                if self.decoder_weight > 0:
+                    self.source_latents = torch.cat(source_latents)
+                    self.source_decoder_outputs = torch.cat(source_decoder_outputs)
+
+        if adapters_were_enabled:
+            self.lora_manager.enable_adapters()
+
+        self.model.train(was_training)
 
     def calibrate_input_scale(self):
         # This accumulates the numerator and denominator of input_delta.square().mean(dim=(0, 2)).
@@ -89,7 +138,18 @@ class TFRegularizer(torch.nn.Module):
 
         return transformed_x
 
-    def model_response(self, anchor_indices=None):
+    def model_representation(self, x):
+        if self.mode == "output_gram":
+            return self.model.deterministic_forward(x)
+
+        mean, log_variance = self.model.encoder(x)
+        return torch.cat([mean, torch.exp(0.5 * log_variance)], dim=-1)
+
+    def decoder_output(self, latents):
+        logits = self.model.decoder(latents)
+        return self.model.decoder_distribution(logits, self.model.decoder_distribution_name).flatten(start_dim=1)
+
+    def model_response(self, anchor_indices=None, return_original=False):
         x = self.x if anchor_indices is None else self.x[anchor_indices]
         transformed_x = self.transformed_x if anchor_indices is None else self.transformed_x[anchor_indices]
 
@@ -98,26 +158,35 @@ class TFRegularizer(torch.nn.Module):
         was_training = self.model.training
         self.model.eval()
 
-        transformed_output = self.model.deterministic_forward(transformed_x.flatten(0, 1)).reshape(num_anchor_points, self.num_transformations, -1)
-        original_output = self.model.deterministic_forward(x).flatten(start_dim=1).unsqueeze(1)
+        transformed_output = self.model_representation(transformed_x.flatten(0, 1)).reshape(num_anchor_points, self.num_transformations, -1)
+        original_output = self.model_representation(x).flatten(start_dim=1).unsqueeze(1)
         response = transformed_output - original_output
 
-        if was_training:
-            self.model.train()
+        self.model.train(was_training)
+
+        if return_original:
+            return original_output.squeeze(1), response
 
         return response
 
-    def gram_matrix(self, anchor_indices=None):
-        response_vector = self.model_response(anchor_indices)
+    def gram_matrix(self, anchor_indices=None, response_vector=None):
+        response_vector = self.model_response(anchor_indices) if response_vector is None else response_vector
         output_dimension = response_vector.shape[-1]
 
         g_matrix = (response_vector @ response_vector.transpose(-1, -2)) / output_dimension
         g_matrix = g_matrix / self.input_scale_matrix
 
-        trace = torch.diagonal(g_matrix, dim1=-2, dim2=-1).sum(dim=-1)
-        g_matrix = g_matrix / trace.clamp_min(1e-12).view(-1, 1, 1)
+        if self.mode == "output_gram":
+            trace = torch.diagonal(g_matrix, dim1=-2, dim2=-1).sum(dim=-1)
+            g_matrix = g_matrix / trace.clamp_min(1e-12).view(-1, 1, 1)
 
         return g_matrix
+
+    def transformation_geometry(self, response_vector):
+        if self.mode == "encoder_response":
+            return response_vector / self.input_scales.view(1, -1, 1)
+
+        return self.gram_matrix(response_vector=response_vector)
 
     def gram_matrix_batched(self, batch_size=None):
         batch_size = batch_size or self.calibration_batch_size
@@ -132,9 +201,25 @@ class TFRegularizer(torch.nn.Module):
     def forward(self):
         anchor_indices = self.sample_anchor_indices()
 
-        current_gram_matrices = self.gram_matrix(anchor_indices)
-        source_gram_matrices = self.source_gram_matrices[anchor_indices]
+        if self.mode == "output_gram":
+            current_gram_matrices = self.gram_matrix(anchor_indices)
+            source_gram_matrices = self.source_gram_matrices[anchor_indices]
+            return torch.square(current_gram_matrices - source_gram_matrices).mean()
 
-        regularizer_loss = torch.square(current_gram_matrices - source_gram_matrices).mean(dim=(-2, -1)).mean()
+        was_training = self.model.training
+        self.model.eval()
 
+        encoder_output, response = self.model_response(anchor_indices, return_original=True)
+        transformation_geometry = self.transformation_geometry(response)
+        encoder_loss = torch.square(encoder_output - self.source_encoder_outputs[anchor_indices]).mean()
+        response_loss = torch.square(transformation_geometry - self.source_transformation_geometries[anchor_indices]).mean()
+        regularizer_loss = encoder_loss + self.response_weight * response_loss
+
+        if self.decoder_weight > 0:
+            latents = self.source_latents[anchor_indices]
+            decoder_output = self.decoder_output(latents.flatten(0, 1)).reshape(len(anchor_indices), 3, -1)
+            decoder_loss = torch.square(decoder_output - self.source_decoder_outputs[anchor_indices]).mean()
+            regularizer_loss = regularizer_loss + self.decoder_weight * decoder_loss
+
+        self.model.train(was_training)
         return regularizer_loss

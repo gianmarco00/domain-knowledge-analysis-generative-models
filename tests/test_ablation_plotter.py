@@ -1,121 +1,66 @@
-import pytest
 import torch
 
 from domain_knowledge_analysis.plotting import AblationPlotter
 
 
 def make_results():
-    results = []
+    results = [{"eta": 0.0, "m": 0, "s": 0.0, "test_target_gain": 0.08, "test_source_degradation": 0.04}]
 
-    for seed in [0, 1]:
-        results.append({
-            "seed": seed,
-            "eta": 0.0,
-            "mode": "ordinary_lora",
-            "m": 0,
-            "subset_index": 0,
-            "test_target_gain": 0.08,
-            "test_source_degradation": 0.04,
-            "held_out_gram_error": 0.03,
-        })
-
-        for mode, m_values in {
-            "semantic_perturbations": [5, 10],
-            "random_perturbations": [5, 10],
-            "both": [20],
-        }.items():
-            for m in m_values:
-                num_subsets = 2 if m == 5 else 1
-
-                for subset_index in range(num_subsets):
-                    results.append({
-                        "seed": seed,
-                        "eta": 1.0,
-                        "mode": mode,
-                        "m": m,
-                        "subset_index": subset_index,
-                        "test_target_gain": 0.07 + 0.001 * m,
-                        "test_source_degradation": 0.03 - 0.001 * m,
-                        "held_out_gram_error": 0.02,
-                    })
+    for eta in [10.0, 100.0]:
+        for m in [5, 10]:
+            for strength in [0.01, 0.5]:
+                results.append({
+                    "eta": eta,
+                    "m": m,
+                    "s": strength,
+                    "test_target_gain": 0.08 - eta / 100000 - strength / 1000,
+                    "test_source_degradation": 0.04 - m / 1000,
+                })
 
     return results
 
 
-def test_ablation_plotter_saves_mode_colored_metric_figures(tmp_path):
-    config = {
-        "transformation_modes": ["semantic_perturbations", "random_perturbations", "both"],
-        "eta_values": [0.0, 1.0],
-        "m_values": {
-            "semantic_perturbations": [5, 10],
-            "random_perturbations": [5, 10],
-            "both": [20],
-        },
-    }
-    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 1.0}
+def test_ablation_plotter_saves_the_four_metric_figures(tmp_path):
+    plotter = AblationPlotter(tmp_path, {})
+    plotter.plot_figure_1(make_results())
+    plotter.plot_figure_2(make_results())
+    plotter.plot_figure_3(make_results())
+    plotter.plot_figure_4(make_results())
 
-    plotter = AblationPlotter(tmp_path, config)
-    plotter.plot_figure_1(make_results(), selected_model)
-    plotter.plot_figure_2(make_results(), selected_model)
-    plotter.plot_heatmaps(make_results())
-
-    assert (tmp_path / "figures" / "figure_1_eta_tradeoff.png").is_file()
+    assert (tmp_path / "figures" / "figure_1_eta.png").is_file()
     assert (tmp_path / "figures" / "figure_2_transformation_count.png").is_file()
-    assert (tmp_path / "figures" / "supplementary_eta_M_heatmaps.png").is_file()
+    assert (tmp_path / "figures" / "figure_3_transformation_strength.png").is_file()
+    assert (tmp_path / "figures" / "figure_4_target_source_tradeoff.png").is_file()
 
 
-def test_ablation_plotter_saves_model_response_grid(tmp_path):
-    config = {"transformation_modes": [], "eta_values": [], "m_values": {}}
-    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 1000.0}
-    responses = {
-        "input": torch.rand(2, 1, 8, 8),
-        "transformed": torch.rand(2, 2, 1, 8, 8),
-        "lora": torch.rand(2, 2, 1, 8, 8) - 0.5,
-        "regularized": torch.rand(2, 2, 1, 8, 8) - 0.5,
-        "transformation_labels": ["rotation (15)", "isotropic scale (1.1)"],
+def test_ablation_plotter_saves_the_four_qualitative_figures(tmp_path):
+    selected_model = {"mode": "output_gram", "m": 10, "eta": 1000.0, "s": 0.1}
+    images = torch.rand(2, 1, 8, 8)
+    qualitative_results = {
+        "source": {"input": images, "base": images, "lora": images, "regularized": images},
+        "target": {"input": images, "base": images, "lora": images, "regularized": images},
+        "generation": {"base": images, "lora": images, "regularized": images},
+        "responses": {
+            "input": images,
+            "transformed": torch.rand(2, 2, 1, 8, 8),
+            "lora": torch.rand(2, 2, 1, 8, 8) - 0.5,
+            "regularized": torch.rand(2, 2, 1, 8, 8) - 0.5,
+            "transformation_labels": ["horizontal translation (2)", "isotropic scale (1.1)"],
+            "selected_model": selected_model,
+        },
         "selected_model": selected_model,
     }
 
-    AblationPlotter(tmp_path, config).plot_model_responses(responses)
+    AblationPlotter(tmp_path, {}).plot_qualitative(qualitative_results)
 
-    assert (tmp_path / "figures" / "figure_4_model_responses.png").is_file()
-
-
-def test_ablation_plotter_includes_sparse_extra_runs(tmp_path):
-    config = {
-        "transformation_modes": ["semantic_perturbations", "random_perturbations", "both"],
-        "eta_values": [0.0, 1.0],
-        "m_values": {
-            "semantic_perturbations": [5, 10],
-            "random_perturbations": [5, 10],
-            "both": [20],
-        },
-        "extra_runs": [
-            {"seed": 0, "eta": 10.0, "mode": "semantic_no_rotation", "transformations": ["a", "b", "c", "d", "e"]},
-            {"seed": 0, "eta": 10.0, "mode": "semantic_perturbations", "transformations": [str(index) for index in range(10)]},
-        ],
-    }
-    results = make_results()
-    results.extend([
-        {"seed": 0, "eta": 10.0, "mode": "semantic_no_rotation", "m": 5, "subset_index": 0, "test_target_gain": 0.079, "test_source_degradation": 0.018, "held_out_gram_error": 0.015},
-        {"seed": 0, "eta": 10.0, "mode": "semantic_perturbations", "m": 10, "subset_index": 0, "test_target_gain": 0.078, "test_source_degradation": 0.017, "held_out_gram_error": 0.014},
-    ])
-    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 10.0}
-    plotter = AblationPlotter(tmp_path, config)
-
-    plotter.plot_figure_1(results, selected_model)
-    plotter.plot_figure_2(results, selected_model)
-    plotter.plot_heatmaps(results)
-
-    assert plotter.eta_values == [0.0, 1.0, 10.0]
-    assert "semantic_no_rotation" in plotter.modes
-    assert (tmp_path / "figures" / "figure_1_eta_tradeoff.png").is_file()
-    assert (tmp_path / "figures" / "figure_2_transformation_count.png").is_file()
-    assert (tmp_path / "figures" / "supplementary_eta_M_heatmaps.png").is_file()
+    assert (tmp_path / "figures" / "figure_5_source_reconstructions.png").is_file()
+    assert (tmp_path / "figures" / "figure_6_target_reconstructions.png").is_file()
+    assert (tmp_path / "figures" / "figure_7_generations.png").is_file()
+    assert (tmp_path / "figures" / "figure_8_model_responses.png").is_file()
 
 
-def test_mean_ci_uses_student_t_for_three_seeds():
-    mean, confidence_interval = AblationPlotter.mean_ci([1.0, 2.0, 3.0])
+def test_selected_model_label_does_not_expose_transformation_type():
+    label = AblationPlotter.selected_model_label({"mode": "output_gram", "m": 10, "eta": 1000.0, "s": 0.1})
 
-    assert mean == pytest.approx(2.0)
-    assert confidence_interval == pytest.approx(2.484, abs=0.001)
+    assert label == "η=1000, M=10, s=0.1"
+    assert "semantic" not in label

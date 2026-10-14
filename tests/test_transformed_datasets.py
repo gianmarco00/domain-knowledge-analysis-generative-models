@@ -85,16 +85,16 @@ def test_fixed_rotation_preserves_shape_and_uses_zero_fill():
         ("stroke_thickness", -1),
         ("stroke_thickness", 1),
         ("random_direction_0", 0.05),
-        ("horizontal_flip", 0.5),
-        ("vertical_flip", 0.5),
         ("gamma_correction", 1.2),
         ("binarization", 0.5),
-        ("pixelation", 0.5),
-        ("horizontal_motion_blur", 0.5),
-        ("vertical_motion_blur", 0.5),
         ("horizontal_wave", 2),
         ("vertical_wave", 2),
         ("perspective", 0.2),
+        ("vertical_perspective", 0.2),
+        ("swirl", 0.5),
+        ("radial_bulge", 0.5),
+        ("sharpen", 0.5),
+        ("vignette", 0.5),
     ],
 )
 def test_regularizer_transformations_preserve_batched_image_shape(transformation_type, intensity):
@@ -144,16 +144,16 @@ def test_fixed_translations_support_fractional_pixels():
         ("gaussian_blur", 0),
         ("contrast", 1),
         ("random_direction_0", 0),
-        ("horizontal_flip", 0),
-        ("vertical_flip", 0),
         ("gamma_correction", 1),
         ("binarization", 0),
-        ("pixelation", 0),
-        ("horizontal_motion_blur", 0),
-        ("vertical_motion_blur", 0),
         ("horizontal_wave", 0),
         ("vertical_wave", 0),
         ("perspective", 0),
+        ("vertical_perspective", 0),
+        ("swirl", 0),
+        ("radial_bulge", 0),
+        ("sharpen", 0),
+        ("vignette", 0),
     ],
 )
 def test_regularizer_transformations_are_exact_at_identity(transformation_type, identity_intensity):
@@ -173,7 +173,7 @@ def test_aspect_ratio_deformation_is_continuous():
     assert not torch.equal(transformed, image)
 
 
-@pytest.mark.parametrize("transformation_type", ["horizontal_flip", "vertical_flip", "binarization", "pixelation", "horizontal_motion_blur", "vertical_motion_blur"])
+@pytest.mark.parametrize("transformation_type", ["binarization", "sharpen", "vignette"])
 def test_bounded_transformations_follow_a_continuous_blend_path(transformation_type):
     image = torch.rand(2, 1, 9, 9)
     endpoint = dataset_utils.create_dataset_transformation(transformation_type, 1)(image)
@@ -262,16 +262,16 @@ def relative_strength_config(transformation_strength=0.5):
     config["lora"]["regularizer"]["transformation_strength"] = transformation_strength
     config["lora"]["regularizer"]["transformations"] = config["lora"]["regularizer"]["transformations"][:-1]
     config["lora"]["regularizer"]["transformations"].extend([
-        {"name": "horizontal_flip", "intensity": 0.5},
-        {"name": "vertical_flip", "intensity": 0.5},
         {"name": "gamma_correction", "intensity": 1.2},
         {"name": "binarization", "intensity": 0.5},
-        {"name": "pixelation", "intensity": 0.5},
-        {"name": "horizontal_motion_blur", "intensity": 0.5},
-        {"name": "vertical_motion_blur", "intensity": 0.5},
         {"name": "horizontal_wave", "intensity": 2},
         {"name": "vertical_wave", "intensity": -2},
         {"name": "perspective", "intensity": -0.2},
+        {"name": "vertical_perspective", "intensity": 0.2},
+        {"name": "swirl", "intensity": 0.5},
+        {"name": "radial_bulge", "intensity": 0.5},
+        {"name": "sharpen", "intensity": 0.5},
+        {"name": "vignette", "intensity": 0.5},
     ])
     return config
 

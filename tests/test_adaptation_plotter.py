@@ -90,3 +90,4 @@ def test_adaptation_plotter_wraps_regularizer_configuration_in_footer(tmp_path, 
     assert "stroke_thickness: 1" in footer_text
     assert "eta: 1" in footer_text
     assert "anchor points: 300" in footer_text
+    assert "mode: output_gram" in footer_text

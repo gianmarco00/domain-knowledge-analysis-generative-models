@@ -38,8 +38,8 @@ MEDMNIST_DATASETS = {
 }
 
 
-TRANSFORMATION_IMPLEMENTATION_VERSION = 4
-TRANSFORMED_DATASET_CACHE_VERSION = 4
+TRANSFORMATION_IMPLEMENTATION_VERSION = 5
+TRANSFORMED_DATASET_CACHE_VERSION = 5
 
 
 def affine_sample(image, theta):
@@ -59,6 +59,13 @@ def dense_sample(image, grid):
     grid = grid.unsqueeze(0).expand(len(images), -1, -1, -1)
     transformed = F.grid_sample(images, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
     return transformed[0] if is_unbatched else transformed
+
+
+def identity_grid(image):
+    """Create the normalized identity grid used by fixed-shape dense transformations."""
+    height, width = image.shape[-2:]
+    theta = image.new_tensor([[1, 0, 0], [0, 1, 0]]).unsqueeze(0)
+    return F.affine_grid(theta, (1, image.shape[-3], height, width), align_corners=False)[0]
 
 
 class FixedRotation:
@@ -262,43 +269,22 @@ class FixedBlendTransformation:
         return torch.lerp(image, self.endpoint(image), self.intensity)
 
 
-class FixedHorizontalFlip(FixedBlendTransformation):
-    def endpoint(self, image):
-        return image.flip(-1)
-
-
-class FixedVerticalFlip(FixedBlendTransformation):
-    def endpoint(self, image):
-        return image.flip(-2)
-
-
 class FixedBinarization(FixedBlendTransformation):
     def endpoint(self, image):
         return (image >= 0.5).to(image.dtype)
 
 
-class FixedPixelation(FixedBlendTransformation):
+class FixedSharpen(FixedBlendTransformation):
     def endpoint(self, image):
-        is_unbatched = image.ndim == 3
-        images = image.unsqueeze(0) if is_unbatched else image
-        pixelated = F.interpolate(F.adaptive_avg_pool2d(images, (2, 2)), size=images.shape[-2:], mode="nearest")
-        return pixelated[0] if is_unbatched else pixelated
+        blurred = F.avg_pool2d(F.pad(image, (1, 1, 1, 1), mode="reflect"), kernel_size=3, stride=1)
+        return (2 * image - blurred).clamp(0, 1)
 
 
-class FixedMotionBlur(FixedBlendTransformation):
-    def __init__(self, intensity, vertical=False):
-        super().__init__(intensity)
-        self.vertical = vertical
-
+class FixedVignette(FixedBlendTransformation):
     def endpoint(self, image):
-        image_size = image.shape[-2] if self.vertical else image.shape[-1]
-        kernel_size = image_size if image_size % 2 else image_size - 1
-        padding = kernel_size // 2
-
-        if self.vertical:
-            return F.avg_pool2d(F.pad(image, (0, 0, padding, padding), mode="reflect"), kernel_size=(kernel_size, 1), stride=1)
-
-        return F.avg_pool2d(F.pad(image, (padding, padding, 0, 0), mode="reflect"), kernel_size=(1, kernel_size), stride=1)
+        grid = identity_grid(image)
+        radius = torch.sqrt(grid[..., 0].square() + grid[..., 1].square())
+        return image * (1 - radius / radius.max()).clamp_min(0)
 
 
 class FixedWave:
@@ -315,8 +301,7 @@ class FixedWave:
             return image
 
         height, width = image.shape[-2:]
-        theta = image.new_tensor([[1, 0, 0], [0, 1, 0]]).unsqueeze(0)
-        grid = F.affine_grid(theta, (1, image.shape[-3], height, width), align_corners=False)[0]
+        grid = identity_grid(image)
 
         if self.vertical:
             grid[..., 1] -= 2 * self.amplitude * torch.sin(math.pi * grid[..., 0]) / height
@@ -327,10 +312,11 @@ class FixedWave:
 
 
 class FixedPerspective:
-    """Apply a horizontal keystone deformation with a fixed output shape."""
+    """Apply a horizontal or vertical keystone deformation with a fixed output shape."""
 
-    def __init__(self, coefficient):
+    def __init__(self, coefficient, vertical=False):
         self.coefficient = float(coefficient)
+        self.vertical = vertical
 
         if abs(self.coefficient) >= 1:
             raise ValueError("Perspective coefficient must be in (-1, 1).")
@@ -342,10 +328,58 @@ class FixedPerspective:
         if self.coefficient == 0:
             return image
 
-        height, width = image.shape[-2:]
-        theta = image.new_tensor([[1, 0, 0], [0, 1, 0]]).unsqueeze(0)
-        grid = F.affine_grid(theta, (1, image.shape[-3], height, width), align_corners=False)[0]
-        grid[..., 0] /= 1 + self.coefficient * grid[..., 1]
+        grid = identity_grid(image)
+
+        if self.vertical:
+            grid[..., 1] /= 1 + self.coefficient * grid[..., 0]
+        else:
+            grid[..., 0] /= 1 + self.coefficient * grid[..., 1]
+
+        return dense_sample(image, grid)
+
+
+class FixedSwirl:
+    """Twist the image continuously while keeping the outer radius fixed."""
+
+    def __init__(self, intensity):
+        self.intensity = float(intensity)
+
+        if not 0 <= self.intensity <= 1:
+            raise ValueError("Swirl intensity must be in [0, 1].")
+
+        self.finite_difference_step = self.intensity
+
+    def __call__(self, image):
+        if self.intensity == 0:
+            return image
+
+        grid = identity_grid(image)
+        x, y = grid[..., 0].clone(), grid[..., 1].clone()
+        radius = torch.sqrt((x.square() + y.square()) / 2).clamp(max=1)
+        angle = 2 * math.pi * self.intensity * (1 - radius)
+        grid[..., 0] = torch.cos(angle) * x - torch.sin(angle) * y
+        grid[..., 1] = torch.sin(angle) * x + torch.cos(angle) * y
+        return dense_sample(image, grid)
+
+
+class FixedRadialBulge:
+    """Magnify the image center continuously without folding the sampling grid."""
+
+    def __init__(self, intensity):
+        self.intensity = float(intensity)
+
+        if not 0 <= self.intensity <= 1:
+            raise ValueError("Radial-bulge intensity must be in [0, 1].")
+
+        self.finite_difference_step = self.intensity
+
+    def __call__(self, image):
+        if self.intensity == 0:
+            return image
+
+        grid = identity_grid(image)
+        radius = torch.sqrt((grid[..., 0].square() + grid[..., 1].square()) / 2).clamp(max=1)
+        grid *= (1 - self.intensity * (1 - radius)).unsqueeze(-1)
         return dense_sample(image, grid)
 
 
@@ -438,23 +472,14 @@ def create_dataset_transformation(transformation_type, intensity, direction_seed
     if transformation_type == "stroke_thickness":
         return FixedStrokeThickness(intensity=intensity)
 
-    if transformation_type == "horizontal_flip":
-        return FixedHorizontalFlip(intensity=intensity)
-
-    if transformation_type == "vertical_flip":
-        return FixedVerticalFlip(intensity=intensity)
-
     if transformation_type == "binarization":
         return FixedBinarization(intensity=intensity)
 
-    if transformation_type == "pixelation":
-        return FixedPixelation(intensity=intensity)
+    if transformation_type == "sharpen":
+        return FixedSharpen(intensity=intensity)
 
-    if transformation_type == "horizontal_motion_blur":
-        return FixedMotionBlur(intensity=intensity)
-
-    if transformation_type == "vertical_motion_blur":
-        return FixedMotionBlur(intensity=intensity, vertical=True)
+    if transformation_type == "vignette":
+        return FixedVignette(intensity=intensity)
 
     if transformation_type == "horizontal_wave":
         return FixedWave(amplitude=intensity)
@@ -464,6 +489,15 @@ def create_dataset_transformation(transformation_type, intensity, direction_seed
 
     if transformation_type == "perspective":
         return FixedPerspective(coefficient=intensity)
+
+    if transformation_type == "vertical_perspective":
+        return FixedPerspective(coefficient=intensity, vertical=True)
+
+    if transformation_type == "swirl":
+        return FixedSwirl(intensity=intensity)
+
+    if transformation_type == "radial_bulge":
+        return FixedRadialBulge(intensity=intensity)
 
     raise ValueError(
         f"Unsupported dataset transformation: {transformation_type}"

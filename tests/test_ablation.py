@@ -195,31 +195,6 @@ def test_score_split_computes_target_gain_and_source_degradation(monkeypatch):
     assert metrics["source_degradation"] == pytest.approx(0.03)
 
 
-def test_score_gram_error_averages_all_gram_entries(monkeypatch):
-    class FakeRegularizer:
-        def __init__(self, *args, **kwargs):
-            self.source_gram_matrices = torch.zeros(2, 2, 2)
-
-        def gram_matrix_batched(self, batch_size):
-            return torch.ones(2, 2, 2)
-
-    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.TFRegularizer", FakeRegularizer)
-    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_regularizer_transformations", lambda config, device: None)
-
-    ablation = Ablation.__new__(Ablation)
-    ablation.ablation_config = {"gram_num_images": 2, "gram_batch_size": 2}
-    ablation.evaluation_families = []
-    experiment = type("Experiment", (), {
-        "config": {"lora": {}},
-        "device": torch.device("cpu"),
-        "model": object(),
-        "lora_manager": object(),
-    })()
-    source_dataloader = [(torch.zeros(2, 1, 2, 2), torch.zeros(2))]
-
-    assert ablation.score_gram_error(experiment, source_dataloader) == pytest.approx(1.0)
-
-
 def test_model_responses_are_output_differences_for_both_models(monkeypatch):
     class ResponseModel(torch.nn.Module):
         def __init__(self, scale):
@@ -234,16 +209,20 @@ def test_model_responses_are_output_differences_for_both_models(monkeypatch):
             self.device = torch.device("cpu")
             self.model = ResponseModel(scale)
             self.lora_manager = FakeLoRAManager()
-            self.config = {"lora": {"regularizer": {"transformations": [{"name": "first", "intensity": 1}, {"name": "second", "intensity": 2}]}}}
+            self.config = {"dataset": {"name": "mnist"}, "lora": {"regularizer": {"transformation_strength": 0.1, "transformations": [{"name": "first", "intensity": 1}, {"name": "second", "intensity": 2}]}}}
 
     transformations = [lambda images: images + 0.1, lambda images: images - 0.2]
-    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_regularizer_transformations", lambda config, device: (transformations, None))
+    anchor_points = torch.zeros(3, 1, 2, 2)
+    received_anchor_points = []
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.select_anchor_points", lambda config, dataset_name, device: anchor_points)
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_regularizer_transformations", lambda config, device, anchors: (received_anchor_points.append(anchors) or transformations, None))
     ablation = Ablation.__new__(Ablation)
     ablation.ablation_config = {"num_response_images": 2, "response_transformations": ["first", "second"]}
-    selected_model = {"mode": "semantic_perturbations", "m": 10, "eta": 1000.0}
+    selected_model = {"mode": "output_gram", "m": 10, "eta": 1000.0, "s": 0.1}
     results = ablation.create_model_responses(ResponseExperiment(2), ResponseExperiment(3), torch.zeros(2, 1, 2, 2), selected_model)
 
     torch.testing.assert_close(results["lora"][0], torch.full((2, 1, 2, 2), 0.2))
     torch.testing.assert_close(results["lora"][1], torch.full((2, 1, 2, 2), -0.4))
     torch.testing.assert_close(results["regularized"][0], torch.full((2, 1, 2, 2), 0.3))
     torch.testing.assert_close(results["regularized"][1], torch.full((2, 1, 2, 2), -0.6))
+    assert received_anchor_points[0] is anchor_points

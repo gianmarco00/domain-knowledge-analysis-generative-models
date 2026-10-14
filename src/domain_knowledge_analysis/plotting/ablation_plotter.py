@@ -1,254 +1,85 @@
 from pathlib import Path
-from statistics import fmean
-import math
 
 import matplotlib.pyplot as plt
-import torch
-from matplotlib.colors import TwoSlopeNorm
 from matplotlib.lines import Line2D
-from scipy.stats import t
 
 
 class AblationPlotter:
-    MODE_COLORS = {
-        "semantic_perturbations": "#0072B2",
-        "semantic_no_rotation": "#CC79A7",
-        "random_perturbations": "#D55E00",
-        "both": "#009E73",
-    }
-
-    MODE_LABELS = {
-        "semantic_perturbations": "Semantic",
-        "semantic_no_rotation": "Semantic without rotation",
-        "random_perturbations": "Random",
-        "both": "Semantic + random",
-    }
+    REGULARIZED_COLOR = "#0072B2"
+    ORDINARY_COLOR = "#7A7A7A"
 
     def __init__(self, output_dir, config):
         self.output_dir = Path(output_dir) / "figures"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.config = config
-        extra_runs = config.get("extra_runs", [])
-        self.modes = list(dict.fromkeys([*config["transformation_modes"], *[run["mode"] for run in extra_runs]]))
-        self.m_values = {mode: list(config["m_values"].get(mode, [])) for mode in self.modes}
 
-        for run in extra_runs:
-            m = len(run["transformations"])
+    def plot_figure_1(self, results):
+        self.plot_metric_pair(results, "eta", "m", "η", "M", "Effect of regularization weight", "figure_1_eta.png")
 
-            if m not in self.m_values[run["mode"]]:
-                self.m_values[run["mode"]].append(m)
+    def plot_figure_2(self, results):
+        self.plot_metric_pair(results, "m", "eta", "Number of transformations M", "η", "Effect of transformation count", "figure_2_transformation_count.png")
 
-        self.eta_values = sorted(set([0.0, *[float(eta) for eta in config["eta_values"]], *[float(run["eta"]) for run in extra_runs]]))
+    def plot_figure_3(self, results):
+        self.plot_metric_pair(results, "s", "m", "Transformation strength s", "M", "Effect of transformation strength", "figure_3_transformation_strength.png")
 
-    def rows_for(self, results, eta, mode, m):
-        if eta == 0:
-            return [row for row in results if row["eta"] == 0]
+    def plot_metric_pair(self, results, x_name, color_name, x_label, color_label, title, filename):
+        regularized_rows = [row for row in results if float(row["eta"]) != 0]
+        ordinary_rows = [row for row in results if float(row["eta"]) == 0]
+        color_values = sorted({float(row[color_name]) for row in regularized_rows})
+        colors = {value: plt.get_cmap("tab10")(index) for index, value in enumerate(color_values)}
+        metrics = [("test_target_gain", "Target gain (×10⁻³) ↑"), ("test_source_degradation", "Source degradation (×10⁻³) ↓")]
+        figure, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharex=True)
 
-        return [row for row in results if row["eta"] == eta and row["mode"] == mode and row["m"] == m]
+        for axis, (metric, y_label) in zip(axes, metrics):
+            for color_value in color_values:
+                rows = [row for row in regularized_rows if float(row[color_name]) == color_value]
+                axis.scatter([float(row[x_name]) for row in rows], [1000 * float(row[metric]) for row in rows], s=55, color=colors[color_value], edgecolor="white", linewidth=0.6, alpha=0.8)
 
-    @staticmethod
-    def mean_ci(values):
-        values = torch.tensor(values, dtype=torch.float32)
-        mean = values.mean().item()
+            axis.scatter([0.0] * len(ordinary_rows), [1000 * float(row[metric]) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
+            axis.axhline(0, color="0.75", linewidth=0.8)
+            axis.set_xlabel(x_label)
+            axis.set_ylabel(y_label)
+            axis.grid(color="0.9", linestyle="--", linewidth=0.7)
 
-        if len(values) == 1:
-            return mean, 0.0
+            if x_name in {"eta", "s"}:
+                positive_values = sorted({float(row[x_name]) for row in regularized_rows})
+                axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
+                axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
+            else:
+                axis.set_xticks(sorted({0, *[int(row[x_name]) for row in regularized_rows]}))
 
-        critical_value = t.ppf(0.975, df=len(values) - 1)
-        ci = critical_value * values.std(unbiased=True).item() / math.sqrt(len(values))
-        return mean, ci
+        handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[value], markeredgecolor="white", markersize=8, label=f"{value:g}") for value in color_values]
+        handles.append(Line2D([0], [0], marker="D", color="none", markerfacecolor=self.ORDINARY_COLOR, markersize=8, label="Ordinary LoRA"))
+        axes[1].legend(handles=handles, title=color_label, loc="best")
+        figure.suptitle(title)
+        figure.tight_layout()
+        figure.savefig(self.output_dir / filename, dpi=200)
+        plt.close(figure)
 
-    @staticmethod
-    def grouped_values(rows, group_name, metric):
-        groups = {}
-
-        for row in rows:
-            groups.setdefault(row[group_name], []).append(float(row[metric]))
-
-        return [fmean(values) for values in groups.values()]
-
-    def plot_figure_1(self, results, selected_model):
-        figure, axis = plt.subplots(figsize=(8.5, 6.5))
-        ordinary_rows = [row for row in results if row["eta"] == 0]
-        ordinary_source = [float(row["test_source_degradation"]) for row in ordinary_rows]
-        ordinary_target = [float(row["test_target_gain"]) for row in ordinary_rows]
-        ordinary_source_mean = fmean(ordinary_source)
-        ordinary_target_mean = fmean(ordinary_target)
-        positive_eta_values = [eta for eta in self.eta_values if eta != 0]
-        markers = ["o", "s", "^", "P", "X", "v"]
-        eta_markers = {eta: markers[index % len(markers)] for index, eta in enumerate(positive_eta_values)}
-
-        for mode in self.modes:
-            color = self.MODE_COLORS[mode]
-            full_m = max(self.m_values[mode])
-
-            for eta in positive_eta_values:
-                rows = self.rows_for(results, eta, mode, full_m)
-
-                if not rows:
-                    continue
-
-                source_values = [1000 * float(row["test_source_degradation"]) for row in rows]
-                target_values = [1000 * float(row["test_target_gain"]) for row in rows]
-                source_mean = fmean(source_values)
-                target_mean = fmean(target_values)
-
-                axis.scatter(source_values, target_values, s=28, marker=eta_markers[eta], color=color, alpha=0.25)
-                axis.scatter(source_mean, target_mean, s=95, marker=eta_markers[eta], color=color, edgecolor="white", linewidth=0.9, zorder=3)
-
-                if mode == selected_model["mode"] and full_m == selected_model["m"] and eta == selected_model["eta"]:
-                    axis.scatter(source_mean, target_mean, s=190, marker="o", facecolor="none", edgecolor="black", linewidth=1.8, zorder=4)
-
-        axis.scatter([1000 * value for value in ordinary_source], [1000 * value for value in ordinary_target], s=28, marker="D", color="0.25", alpha=0.25)
-        axis.scatter(1000 * ordinary_source_mean, 1000 * ordinary_target_mean, s=105, marker="D", color="0.25", edgecolor="white", linewidth=0.9, zorder=3)
+    def plot_figure_4(self, results):
+        regularized_rows = [row for row in results if float(row["eta"]) != 0]
+        ordinary_rows = [row for row in results if float(row["eta"]) == 0]
+        figure, axis = plt.subplots(figsize=(7.5, 6))
+        axis.scatter([1000 * float(row["test_source_degradation"]) for row in regularized_rows], [1000 * float(row["test_target_gain"]) for row in regularized_rows], s=58, color=self.REGULARIZED_COLOR, edgecolor="white", linewidth=0.6, alpha=0.8, label="Regularized LoRA")
+        axis.scatter([1000 * float(row["test_source_degradation"]) for row in ordinary_rows], [1000 * float(row["test_target_gain"]) for row in ordinary_rows], s=82, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA", zorder=3)
         axis.set_xlabel("Source degradation (×10⁻³) ↓")
         axis.set_ylabel("Target gain (×10⁻³) ↑")
         axis.set_title("Target learning versus source preservation")
         axis.grid(color="0.9", linestyle="--", linewidth=0.7)
-        axis.margins(x=0.12, y=0.18)
-        axis.text(0.02, 0.98, "Better", transform=axis.transAxes, va="top", fontweight="bold")
-        axis.annotate("", xy=(0.02, 0.90), xytext=(0.13, 0.79), xycoords="axes fraction", arrowprops={"arrowstyle": "->", "color": "0.25"})
-
-        mode_handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=self.MODE_COLORS[mode], markeredgecolor="white", markersize=9, label=self.MODE_LABELS[mode]) for mode in self.modes]
-        eta_handles = [Line2D([0], [0], marker=eta_markers[eta], color="0.3", linestyle="none", markersize=8, label=f"η={eta:g}") for eta in positive_eta_values]
-        other_handles = [Line2D([0], [0], marker="D", color="none", markerfacecolor="0.25", markersize=8, label="Ordinary LoRA"), Line2D([0], [0], marker="o", color="black", markerfacecolor="none", markersize=10, label="Selected model")]
-        mode_legend = axis.legend(handles=mode_handles, title="Transformation type", loc="lower left")
-        axis.add_artist(mode_legend)
-        axis.legend(handles=[*eta_handles, *other_handles], title="Regularization", loc="lower right")
-
-        figure.text(0.5, 0.01, "Axes are zoomed to adapted models. Original VAE is at (0, 0), outside this view. Small points are individual seeds.", ha="center", fontsize=9)
-        figure.tight_layout(rect=[0, 0.04, 1, 1])
-        figure.savefig(self.output_dir / "figure_1_eta_tradeoff.png", dpi=200)
-        plt.close(figure)
-
-    def plot_figure_2(self, results, selected_model):
-        metrics = [
-            ("test_target_gain", "Target gain retained (%) ↑", 100.0),
-            ("test_source_degradation", "Source damage reduced (%) ↑", 0.0),
-            ("held_out_gram_error", "Gram error reduced (%) ↑", 0.0),
-        ]
-
-        figure, axes = plt.subplots(1, 3, figsize=(16, 4.8))
-        ordinary_rows = [row for row in results if row["eta"] == 0]
-        eta_star = float(selected_model["eta"])
-        offsets = torch.linspace(-0.27, 0.27, len(self.modes)) if len(self.modes) > 1 else torch.zeros(1)
-        mode_offsets = {mode: offset.item() for mode, offset in zip(self.modes, offsets)}
-
-        for axis_index, (axis, (metric, label, reference)) in enumerate(zip(axes, metrics)):
-            ordinary_mean = fmean(float(row[metric]) for row in ordinary_rows)
-
-            def relative(value):
-                if metric == "test_target_gain":
-                    return 100 * value / ordinary_mean
-
-                return 100 * (ordinary_mean - value) / ordinary_mean
-
-            axis.scatter(0, reference, s=105, marker="D", color="0.25", edgecolor="white", linewidth=0.9, zorder=3)
-
-            for mode in self.modes:
-                color = self.MODE_COLORS[mode]
-
-                for m in self.m_values[mode]:
-                    rows = self.rows_for(results, eta_star, mode, int(m))
-
-                    if not rows:
-                        continue
-
-                    seed_values = [relative(value) for value in self.grouped_values(rows, "seed", metric)]
-                    subset_values = [relative(value) for value in self.grouped_values(rows, "subset_index", metric)]
-                    position = m + mode_offsets[mode]
-                    offsets = torch.linspace(-0.10, 0.10, len(subset_values)) if len(subset_values) > 1 else torch.zeros(1)
-
-                    axis.scatter([position + offset.item() for offset in offsets], subset_values, s=26, color=color, alpha=0.22)
-                    axis.scatter([position] * len(seed_values), seed_values, s=34, marker="x", color=color, alpha=0.65)
-                    axis.scatter(position, fmean(seed_values), s=95, color=color, edgecolor="white", linewidth=0.9, zorder=3)
-
-                    if mode == selected_model["mode"] and m == selected_model["m"]:
-                        axis.scatter(position, fmean(seed_values), s=190, facecolor="none", edgecolor="black", linewidth=1.8, zorder=4)
-
-            axis.set_xticks(sorted(set([0, *(m for mode in self.modes for m in self.m_values[mode])])))
-            axis.set_xlabel("Number of transformation families M")
-            axis.set_ylabel(label)
-            axis.axhline(reference, color="0.75", linestyle="--", linewidth=1)
-            axis.grid(axis="y", color="0.9", linestyle="--", linewidth=0.7)
-
-        handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=self.MODE_COLORS[mode], markeredgecolor="white", markersize=9, label=self.MODE_LABELS[mode]) for mode in self.modes]
-        handles.extend([Line2D([0], [0], marker="D", color="none", markerfacecolor="0.25", markersize=8, label="Ordinary LoRA"), Line2D([0], [0], marker="o", color="black", markerfacecolor="none", markersize=10, label="Selected model")])
-        axes[0].legend(handles=handles)
-        figure.suptitle(f"Transformation-family ablation at η*={eta_star:g}")
-        figure.text(0.5, 0.01, "Values are relative to ordinary LoRA. Small circles are subset means; × markers are seed means.", ha="center", fontsize=9)
-        figure.tight_layout(rect=[0, 0.04, 1, 1])
-        figure.savefig(self.output_dir / "figure_2_transformation_count.png", dpi=200)
-        plt.close(figure)
-
-    def plot_heatmaps(self, results):
-        ordinary_rows = [row for row in results if row["eta"] == 0]
-        ordinary_target = fmean(float(row["test_target_gain"]) for row in ordinary_rows)
-        ordinary_source = fmean(float(row["test_source_degradation"]) for row in ordinary_rows)
-        eta_values = [eta for eta in self.eta_values if eta != 0]
-        configurations = [(mode, int(m)) for mode in self.modes for m in self.m_values[mode]]
-        labels = [f"{self.MODE_LABELS[mode]} (M={m})" for mode, m in configurations]
-
-        def metric_value(eta, mode, m, metric):
-            rows = self.rows_for(results, eta, mode, m)
-
-            if not rows:
-                return float("nan")
-
-            mean = fmean(float(row[metric]) for row in rows)
-            return 100 * mean / ordinary_target if metric == "test_target_gain" else 100 * (ordinary_source - mean) / ordinary_source
-
-        target_matrix = torch.tensor([[metric_value(eta, mode, m, "test_target_gain") for eta in eta_values] for mode, m in configurations])
-        source_matrix = torch.tensor([[metric_value(eta, mode, m, "test_source_degradation") for eta in eta_values] for mode, m in configurations])
-        figure, axes = plt.subplots(1, 2, figsize=(12, 5.5))
-        target_values = target_matrix[~torch.isnan(target_matrix)]
-        source_values = source_matrix[~torch.isnan(source_matrix)]
-        target_cmap = plt.get_cmap("YlGn").with_extremes(bad="0.92")
-        source_cmap = plt.get_cmap("RdYlGn").with_extremes(bad="0.92")
-        target_image = axes[0].imshow(target_matrix, aspect="auto", cmap=target_cmap, vmin=95, vmax=max(100, target_values.max().item()))
-        source_limit = max(abs(source_values.min().item()), abs(source_values.max().item()), 1e-6)
-        source_image = axes[1].imshow(source_matrix, aspect="auto", cmap=source_cmap, norm=TwoSlopeNorm(vmin=-source_limit, vcenter=0, vmax=source_limit))
-
-        for axis, image, matrix, title, decimals in [(axes[0], target_image, target_matrix, "Target gain retained versus LoRA (%)", 2), (axes[1], source_image, source_matrix, "Source damage reduced versus LoRA (%)", 1)]:
-            axis.set_xticks(range(len(eta_values)), [f"{eta:g}" for eta in eta_values])
-            axis.set_yticks(range(len(labels)), labels)
-            axis.set_xlabel("η")
-            axis.set_title(title)
-
-            for row in range(len(labels)):
-                for column in range(len(eta_values)):
-                    value = matrix[row, column].item()
-
-                    if math.isnan(value):
-                        axis.text(column, row, "—", ha="center", va="center", color="0.4", fontsize=9)
-                        continue
-
-                    red, green, blue, _ = image.cmap(image.norm(value))
-                    text_color = "black" if 0.299 * red + 0.587 * green + 0.114 * blue > 0.52 else "white"
-                    axis.text(column, row, f"{value:.{decimals}f}", ha="center", va="center", color=text_color, fontsize=9)
-
-            figure.colorbar(image, ax=axis, shrink=0.82)
-
-        figure.suptitle("Regularized models relative to ordinary LoRA")
+        axis.legend()
         figure.tight_layout()
-        figure.savefig(self.output_dir / "supplementary_eta_M_heatmaps.png", dpi=200)
+        figure.savefig(self.output_dir / "figure_4_target_source_tradeoff.png", dpi=200)
         plt.close(figure)
 
     def plot_qualitative(self, results):
         selected_label = self.selected_model_label(results["selected_model"])
-        self.plot_reconstructions(results["source"], "Clean MNIST reconstructions", "figure_3a_source_reconstructions.png", selected_label)
-        self.plot_reconstructions(results["target"], "Rotated MNIST reconstructions", "figure_3b_target_reconstructions.png", selected_label)
+        self.plot_reconstructions(results["source"], "Clean MNIST reconstructions", "figure_5_source_reconstructions.png", selected_label)
+        self.plot_reconstructions(results["target"], "Rotated MNIST reconstructions", "figure_6_target_reconstructions.png", selected_label)
         self.plot_generations(results["generation"], selected_label)
         self.plot_model_responses(results["responses"])
 
     def plot_reconstructions(self, results, title, filename, selected_label):
-        columns = [
-            ("input", "Input"),
-            ("base", "Original VAE"),
-            ("lora", "LoRA"),
-            ("regularized", f"Regularized LoRA\n{selected_label}"),
-        ]
-
+        columns = [("input", "Input"), ("base", "Original VAE"), ("lora", "LoRA"), ("regularized", f"Regularized LoRA\n{selected_label}")]
         num_images = len(results["input"])
         figure, axes = plt.subplots(num_images, len(columns), figsize=(8, 2 * num_images), squeeze=False)
 
@@ -265,12 +96,7 @@ class AblationPlotter:
         plt.close(figure)
 
     def plot_generations(self, results, selected_label):
-        columns = [
-            ("base", "Original VAE"),
-            ("lora", "LoRA"),
-            ("regularized", f"Regularized LoRA\n{selected_label}"),
-        ]
-
+        columns = [("base", "Original VAE"), ("lora", "LoRA"), ("regularized", f"Regularized LoRA\n{selected_label}")]
         num_images = len(results["base"])
         figure, axes = plt.subplots(num_images, len(columns), figsize=(6, 2 * num_images), squeeze=False)
 
@@ -283,7 +109,7 @@ class AblationPlotter:
 
         figure.suptitle("Generation using the same latent vectors")
         figure.tight_layout()
-        figure.savefig(self.output_dir / "figure_3c_generations.png", dpi=200)
+        figure.savefig(self.output_dir / "figure_7_generations.png", dpi=200)
         plt.close(figure)
 
     def plot_model_responses(self, results):
@@ -292,7 +118,7 @@ class AblationPlotter:
         num_rows = num_transformations * num_images
         selected_label = self.selected_model_label(results["selected_model"])
         response_limit = max(results["lora"].abs().max().item(), results["regularized"].abs().max().item(), 1e-6)
-        figure, axes = plt.subplots(num_rows, 4, figsize=(8.5, 1.9 * num_rows), squeeze=False)
+        figure, axes = plt.subplots(num_rows, 4, figsize=(11, 1.9 * num_rows), squeeze=False)
         response_image = None
 
         for transformation_index, transformation_label in enumerate(results["transformation_labels"]):
@@ -305,21 +131,23 @@ class AblationPlotter:
                 axes[row, 0].set_ylabel(f"{transformation_label}\nexample {image_index + 1}", fontsize=8)
 
                 if row == 0:
-                    axes[row, 0].set_title("Input")
-                    axes[row, 1].set_title("Transformed input")
-                    axes[row, 2].set_title("Ordinary LoRA response")
-                    axes[row, 3].set_title(f"Regularized response\n{selected_label}")
+                    axes[row, 0].set_title("Input", fontsize=10, pad=10)
+                    axes[row, 1].set_title("Transformed\ninput", fontsize=10, pad=10)
+                    axes[row, 2].set_title("Ordinary LoRA\nresponse", fontsize=10, pad=10)
+                    axes[row, 3].set_title("Regularized LoRA\nresponse", fontsize=10, pad=10)
 
         colorbar = figure.colorbar(response_image, ax=axes[:, 2:].ravel().tolist(), fraction=0.02, pad=0.02)
         colorbar.set_label("h(T(x)) − h(x)")
-        figure.suptitle("Model responses on clean MNIST\nRed increases output intensity; blue decreases it")
-        figure.subplots_adjust(left=0.17, right=0.89, top=0.93, bottom=0.03, wspace=0.08, hspace=0.12)
-        figure.savefig(self.output_dir / "figure_4_model_responses.png", dpi=200)
+        figure.suptitle("Model responses on clean MNIST", y=0.99)
+        figure.text(0.5, 0.955, f"Selected regularized LoRA: {selected_label}", ha="center", fontsize=10)
+        figure.text(0.5, 0.93, "Red increases output intensity; blue decreases it", ha="center", fontsize=9)
+        figure.subplots_adjust(left=0.15, right=0.9, top=0.84, bottom=0.03, wspace=0.16, hspace=0.18)
+        figure.savefig(self.output_dir / "figure_8_model_responses.png", dpi=200)
         plt.close(figure)
 
-    @classmethod
-    def selected_model_label(cls, selected_model):
-        return f"{cls.MODE_LABELS[selected_model['mode']]}, η={selected_model['eta']:g}, M={selected_model['m']}"
+    @staticmethod
+    def selected_model_label(selected_model):
+        return f"η={float(selected_model['eta']):g}, M={int(selected_model['m'])}, s={float(selected_model['s']):g}"
 
     @staticmethod
     def show_response(axis, response, limit):

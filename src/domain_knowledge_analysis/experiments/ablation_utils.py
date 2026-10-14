@@ -1,79 +1,10 @@
 from copy import deepcopy
 from hashlib import sha256
-from itertools import combinations
-from math import comb
 from pathlib import Path
 from statistics import fmean
 
 import csv
-import random
 import yaml
-
-
-def expand_random_perturbations(random_perturbation_config):
-    num_transformations = int(random_perturbation_config["num_transformations"])
-    intensity = float(random_perturbation_config["intensity"])
-    direction_seed = int(random_perturbation_config["direction_seed"])
-
-    return [
-        {
-            "name": f"random_direction_{direction_index}",
-            "intensity": intensity,
-            "direction_seed": direction_seed,
-        }
-        for direction_index in range(num_transformations)
-    ]
-
-
-def create_transformation_families(ablation_config, mode):
-    semantic_transformations = deepcopy(ablation_config["semantic_transformations"])
-    random_transformations = expand_random_perturbations(ablation_config["random_perturbation"])
-
-    transformations_by_mode = {
-        "semantic_perturbations": semantic_transformations,
-        "random_perturbations": random_transformations,
-        "both": semantic_transformations + random_transformations,
-    }
-
-    return transformations_by_mode[mode]
-
-
-def select_transformation_subsets(transformation_families, m, require_rotation, max_subsets, selection_seed, mode):
-    if require_rotation:
-        rotation = next(family for family in transformation_families if family["name"] == "rotation")
-        remaining_families = [family for family in transformation_families if family["name"] != "rotation"]
-        fixed_families = [rotation]
-    else:
-        remaining_families = transformation_families
-        fixed_families = []
-
-    subset_size = m - len(fixed_families)
-    num_subsets = comb(len(remaining_families), subset_size)
-
-    if num_subsets <= max_subsets:
-        return [[*fixed_families, *subset] for subset in combinations(remaining_families, subset_size)]
-
-    generator = random.Random(f"{selection_seed}:{mode}:{m}")
-    balanced_names = [family["name"] for family in remaining_families]
-    family_counts = {name: 0 for name in balanced_names}
-    selected_subsets = []
-    selected_names = set()
-
-    while len(selected_subsets) < max_subsets:
-        ranked_families = sorted(remaining_families, key=lambda family: (family_counts[family["name"]], generator.random()))
-        selected_subset = [*fixed_families, *ranked_families[:subset_size]]
-        subset_names = tuple(sorted(family["name"] for family in selected_subset))
-
-        if subset_names in selected_names:
-            continue
-
-        selected_subsets.append(selected_subset)
-        selected_names.add(subset_names)
-
-        for family in selected_subset[len(fixed_families):]:
-            family_counts[family["name"]] += 1
-
-    return selected_subsets
 
 
 def transformation_name(transformation_families):
@@ -81,12 +12,25 @@ def transformation_name(transformation_families):
 
 
 def select_named_transformations(ablation_config, transformation_names):
-    transformation_families = create_transformation_families(ablation_config, "both")
-    transformations_by_name = {family["name"]: family for family in transformation_families}
+    transformations_by_name = {family["name"]: family for family in ablation_config["semantic_transformations"]}
+    missing_names = [name for name in transformation_names if name not in transformations_by_name]
+
+    if missing_names:
+        raise ValueError(f"Unknown semantic transformations: {', '.join(missing_names)}.")
+
     return [deepcopy(transformations_by_name[name]) for name in transformation_names]
 
 
-def create_training_config(base_config, seed, eta, transformation_families):
+def select_transformation_prefix(transformation_families, m):
+    m = int(m)
+
+    if not 0 < m <= len(transformation_families):
+        raise ValueError(f"M must be between 1 and {len(transformation_families)}, received {m}.")
+
+    return deepcopy(transformation_families[:m])
+
+
+def create_training_config(base_config, seed, eta, transformation_families, transformation_strength=None, regularizer_mode=None):
     from domain_knowledge_analysis.utils.dataset_utils import TRANSFORMATION_IMPLEMENTATION_VERSION
 
     config = deepcopy(base_config)
@@ -101,25 +45,20 @@ def create_training_config(base_config, seed, eta, transformation_families):
     regularizer_config["eta"] = float(eta)
     regularizer_config["transformations"] = deepcopy(transformation_families)
     regularizer_config["transformation_implementation_version"] = TRANSFORMATION_IMPLEMENTATION_VERSION
-    config["lora"]["regularizer"] = regularizer_config
 
+    if transformation_strength is not None:
+        regularizer_config["transformation_strength"] = float(transformation_strength)
+        regularizer_config.pop("target_input_rms", None)
+
+    if regularizer_mode is not None:
+        regularizer_config["mode"] = regularizer_mode
+
+    config["lora"]["regularizer"] = regularizer_config
     return config
 
 
 def training_config_id(config):
-    training_keys = [
-        "seed",
-        "pretrained_model",
-        "dataset",
-        "dataloader",
-        "training",
-        "loss",
-        "model",
-        "optimizer",
-        "lr_scheduler",
-        "lora",
-    ]
-
+    training_keys = ["seed", "pretrained_model", "dataset", "dataloader", "training", "loss", "model", "optimizer", "lr_scheduler", "lora"]
     training_config = {key: config[key] for key in training_keys}
     config_text = yaml.safe_dump(training_config, sort_keys=True)
     return sha256(config_text.encode()).hexdigest()[:10]
@@ -135,20 +74,19 @@ def save_yaml(data, path):
 
 def generate_model_runs(base_config, ablation_config, output_dir):
     output_dir = Path(output_dir)
-    eta_values = sorted(set([0.0, *[float(eta) for eta in ablation_config["eta_values"]]]))
-    max_subsets = int(ablation_config["max_subsets_per_m"])
-    selection_seed = int(ablation_config["subset_selection_seed"])
+    regularizer_mode = ablation_config["regularizer_mode"]
+    semantic_transformations = ablation_config["semantic_transformations"]
     runs = {}
 
-    def add_run(seed, eta, mode, subset, subset_index, extra_run=False):
-        config = create_training_config(base_config, seed, eta, subset)
+    def add_run(seed, eta, subset, strength=0.0, mode=regularizer_mode, extra_run=False):
+        config = create_training_config(base_config, seed, eta, subset, strength if subset else None, mode if subset else None)
         model_id = training_config_id(config)
 
         if model_id in runs:
             return
 
         m = len(subset)
-        model_name = f"{mode}_seed_{seed}_eta_{float(eta):g}_M_{m}_{model_id}"
+        model_name = f"{mode}_seed_{seed}_eta_{float(eta):g}_M_{m}_s_{float(strength):g}_{model_id}"
         model_dir = output_dir / "models" / model_name
         config["paths"]["run_dir"] = str(model_dir)
         config_path = model_dir / "config.yaml"
@@ -160,33 +98,32 @@ def generate_model_runs(base_config, ablation_config, output_dir):
             "config_path": config_path,
             "seed": int(seed),
             "eta": float(eta),
-            "mode": mode,
+            "mode": mode if subset else "ordinary_lora",
             "m": m,
-            "subset_index": int(subset_index),
+            "s": float(strength) if subset else 0.0,
             "subset": transformation_name(subset),
             "extra_run": bool(extra_run),
         }
 
     for seed in ablation_config["seeds"]:
-        add_run(seed, 0.0, "ordinary_lora", [], 0)
+        add_run(seed, 0.0, [])
 
-        for eta in eta_values:
-            if eta == 0:
-                continue
+        for eta in ablation_config["eta_values"]:
+            for m in ablation_config["m_values"]:
+                subset = select_transformation_prefix(semantic_transformations, m)
 
-            for mode in ablation_config["transformation_modes"]:
-                transformation_families = create_transformation_families(ablation_config, mode)
-                require_rotation = mode in {"semantic_perturbations", "both"}
-
-                for m in ablation_config["m_values"][mode]:
-                    subsets = select_transformation_subsets(transformation_families, int(m), require_rotation, max_subsets, selection_seed, mode)
-
-                    for subset_index, subset in enumerate(subsets):
-                        add_run(seed, eta, mode, subset, subset_index)
+                for strength in ablation_config["s_values"]:
+                    add_run(seed, eta, subset, strength)
 
     for extra_run in ablation_config.get("extra_runs", []):
         subset = select_named_transformations(ablation_config, extra_run["transformations"])
-        add_run(extra_run["seed"], extra_run["eta"], extra_run["mode"], subset, 0, extra_run=True)
+        mode = extra_run.get("mode", regularizer_mode)
+        strength = extra_run.get("s", extra_run.get("transformation_strength"))
+
+        if strength is None:
+            raise ValueError("Every custom ablation run must define s.")
+
+        add_run(extra_run["seed"], extra_run["eta"], subset, strength, mode, extra_run=True)
 
     return list(runs.values())
 
@@ -201,64 +138,26 @@ def save_rows(rows, path):
         writer.writerows(rows)
 
 
-def select_eta(results, eta_values, selection_mode, selection_m, target_gain_fraction):
-    eta_values = sorted(set([0.0, *[float(eta) for eta in eta_values]]))
-    ordinary_rows = [row for row in results if row["eta"] == 0]
+def select_best_models(results, target_gain_fraction=0.99):
+    target_gain_fraction = float(target_gain_fraction)
+
+    if not 0 < target_gain_fraction <= 1:
+        raise ValueError("target_gain_fraction must be in (0, 1].")
+
+    ordinary_rows = [row for row in results if float(row["eta"]) == 0]
+    regularized_rows = [row for row in results if float(row["eta"]) != 0]
+
+    if not ordinary_rows or not regularized_rows:
+        raise ValueError("Best-model selection needs ordinary LoRA and regularized LoRA results.")
+
     ordinary_target_gain = fmean(float(row["validation_target_gain"]) for row in ordinary_rows)
-    required_target_gain = float(target_gain_fraction) * ordinary_target_gain
-    summary = []
+    required_target_gain = target_gain_fraction * ordinary_target_gain
+    best_target = max(regularized_rows, key=lambda row: (float(row["validation_target_gain"]), -float(row["validation_source_degradation"])))
+    best_source = min(regularized_rows, key=lambda row: (float(row["validation_source_degradation"]), -float(row["validation_target_gain"])))
+    eligible_rows = [row for row in regularized_rows if float(row["validation_target_gain"]) >= required_target_gain]
 
-    for eta in eta_values:
-        if eta == 0:
-            rows = ordinary_rows
-        else:
-            rows = [row for row in results if row["eta"] == eta and row["mode"] == selection_mode and row["m"] == selection_m]
+    if not eligible_rows:
+        raise ValueError(f"No regularized model reaches {100 * target_gain_fraction:g}% of ordinary LoRA target gain ({required_target_gain:g}).")
 
-        summary.append({
-            "eta": eta,
-            "validation_target_gain": fmean(float(row["validation_target_gain"]) for row in rows),
-            "validation_source_degradation": fmean(float(row["validation_source_degradation"]) for row in rows),
-        })
-
-    eligible = [row for row in summary if row["validation_target_gain"] >= required_target_gain]
-    selected = min(eligible, key=lambda row: row["validation_source_degradation"])
-
-    for row in summary:
-        row["required_target_gain"] = required_target_gain
-        row["selected"] = row["eta"] == selected["eta"]
-
-    return selected["eta"], summary
-
-
-def select_model(results, target_gain_fraction):
-    ordinary_rows = [row for row in results if row["eta"] == 0]
-    ordinary_target_gain = fmean(float(row["validation_target_gain"]) for row in ordinary_rows)
-    required_target_gain = float(target_gain_fraction) * ordinary_target_gain
-    groups = {}
-
-    for row in results:
-        if row["eta"] == 0:
-            continue
-
-        key = row["mode"], int(row["m"]), float(row["eta"])
-        groups.setdefault(key, []).append(row)
-
-    summary = []
-
-    for (mode, m, eta), rows in sorted(groups.items()):
-        summary.append({
-            "mode": mode,
-            "m": m,
-            "eta": eta,
-            "validation_target_gain": fmean(float(row["validation_target_gain"]) for row in rows),
-            "validation_source_degradation": fmean(float(row["validation_source_degradation"]) for row in rows),
-            "required_target_gain": required_target_gain,
-        })
-
-    eligible = [row for row in summary if row["validation_target_gain"] >= required_target_gain]
-    selected = min(eligible, key=lambda row: row["validation_source_degradation"])
-
-    for row in summary:
-        row["selected"] = row is selected
-
-    return selected, summary
+    best_overall = min(eligible_rows, key=lambda row: (float(row["validation_source_degradation"]), -float(row["validation_target_gain"])))
+    return {"best_target_gain": best_target, "best_source_degradation": best_source, "best_overall": best_overall}, required_target_gain
