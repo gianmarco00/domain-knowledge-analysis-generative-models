@@ -1,10 +1,10 @@
 base_config: config/lora_vae_mnist.yaml
 
 ablation:
-  output_dir: ablations/vae_mnist_rotated_mnist_encoder_response
+  output_dir: ablations/vae_mnist_rotated_mnist_encoder_gram
   parallel_models: 2
 
-  regularizer_mode: encoder_response
+  regularizer_mode: encoder_gram
   seeds: [42]
   eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0]
   m_values: [5, 10, 20]
