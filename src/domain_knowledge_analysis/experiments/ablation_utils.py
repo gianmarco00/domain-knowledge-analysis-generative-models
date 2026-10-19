@@ -155,9 +155,14 @@ def select_best_models(results, target_gain_fraction=0.99):
     best_target = max(regularized_rows, key=lambda row: (float(row["validation_target_gain"]), -float(row["validation_source_degradation"])))
     best_source = min(regularized_rows, key=lambda row: (float(row["validation_source_degradation"]), -float(row["validation_target_gain"])))
     eligible_rows = [row for row in regularized_rows if float(row["validation_target_gain"]) >= required_target_gain]
-
-    if not eligible_rows:
-        raise ValueError(f"No regularized model reaches {100 * target_gain_fraction:g}% of ordinary LoRA target gain ({required_target_gain:g}).")
-
-    best_overall = min(eligible_rows, key=lambda row: (float(row["validation_source_degradation"]), -float(row["validation_target_gain"])))
-    return {"best_target_gain": best_target, "best_source_degradation": best_source, "best_overall": best_overall}, required_target_gain
+    best_overall = min(eligible_rows, key=lambda row: (float(row["validation_source_degradation"]), -float(row["validation_target_gain"]))) if eligible_rows else None
+    best_target_gain = float(best_target["validation_target_gain"])
+    selection_summary = {
+        "target_gain_fraction": target_gain_fraction,
+        "ordinary_target_gain": ordinary_target_gain,
+        "required_target_gain": required_target_gain,
+        "best_regularized_target_gain": best_target_gain,
+        "best_regularized_target_fraction": best_target_gain / ordinary_target_gain if ordinary_target_gain != 0 else None,
+        "num_eligible_models": len(eligible_rows),
+    }
+    return {"best_target_gain": best_target, "best_source_degradation": best_source, "best_overall": best_overall}, selection_summary

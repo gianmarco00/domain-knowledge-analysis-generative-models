@@ -3,6 +3,7 @@ from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
 
+import csv
 import torch
 
 from domain_knowledge_analysis import utils
@@ -43,9 +44,17 @@ class Ablation:
         print(f"Ablation contains {len(self.runs)} unique models.")
         self.train_models()
         results = []
+        metrics_path = self.output_dir / "results" / "metrics.csv"
+        saved_results = self.load_saved_results(metrics_path)
 
         for index, run in enumerate(self.runs):
             print(f"\nModel {index + 1}/{len(self.runs)}: {run['model_dir'].name}")
+
+            if run["model_id"] in saved_results:
+                print("Using saved metrics.")
+                results.append(saved_results[run["model_id"]])
+                continue
+
             experiment = self.load_or_train(run)
             metrics = self.evaluate(experiment)
 
@@ -63,15 +72,16 @@ class Ablation:
                 **metrics,
             })
 
-            save_rows(results, self.output_dir / "results" / "metrics.csv")
+            save_rows(results, metrics_path)
             experiment.logger.close()
             del experiment
 
-        best_models, required_target_gain = select_best_models(results, self.ablation_config["target_gain_fraction"])
-        best_model_rows = [{"selection": selection, "required_target_gain": required_target_gain, **model} for selection, model in best_models.items()]
-        selected_model = best_models["best_overall"]
+        best_models, selection_summary = select_best_models(results, self.ablation_config["target_gain_fraction"])
+        best_model_rows = [{"selection": selection, "available": model is not None, "required_target_gain": selection_summary["required_target_gain"], **(model or {})} for selection, model in best_models.items()]
+        selected_model = best_models["best_overall"] or best_models["best_target_gain"]
+        qualitative_selection = "best_overall" if best_models["best_overall"] is not None else "best_target_gain"
         save_rows(best_model_rows, self.output_dir / "results" / "best_models.csv")
-        save_yaml({"target_gain_fraction": self.ablation_config["target_gain_fraction"], "required_target_gain": required_target_gain, "models": {selection: dict(model) for selection, model in best_models.items()}}, self.output_dir / "results" / "best_models.yaml")
+        save_yaml({**selection_summary, "qualitative_selection": qualitative_selection, "models": {selection: dict(model) if model is not None else None for selection, model in best_models.items()}}, self.output_dir / "results" / "best_models.yaml")
 
         plotter = AblationPlotter(self.output_dir, self.ablation_config)
         plotter.plot_figure_1(results)
@@ -83,11 +93,38 @@ class Ablation:
         print("\nBest regularized models:")
 
         for selection, model in best_models.items():
-            print(f"{selection}: eta={model['eta']:g}, M={model['m']}, s={model['s']:g}")
+            if model is None:
+                print(f"{selection}: unavailable because no model reaches {100 * selection_summary['target_gain_fraction']:g}% of ordinary LoRA target gain")
+            else:
+                print(f"{selection}: eta={float(model['eta']):g}, M={int(model['m'])}, s={float(model['s']):g}")
+
+        if best_models["best_overall"] is None:
+            print(f"Figures 5-8 use best_target_gain as a fallback ({100 * selection_summary['best_regularized_target_fraction']:.2f}% of ordinary LoRA target gain).")
 
         print(f"Results saved in: {self.output_dir}")
 
         return results
+
+    @staticmethod
+    def load_saved_results(metrics_path):
+        if not metrics_path.exists():
+            return {}
+
+        with open(metrics_path, newline="") as file:
+            rows = list(csv.DictReader(file))
+
+        text_fields = {"model_id", "model_dir", "config_path", "mode", "subset"}
+
+        for row in rows:
+            for key, value in row.items():
+                if key in {"seed", "m"}:
+                    row[key] = int(value)
+                elif key == "extra_run":
+                    row[key] = value == "True"
+                elif key not in text_fields:
+                    row[key] = float(value)
+
+        return {row["model_id"]: row for row in rows}
 
     def train_models(self):
         runs_to_train = [run for run in self.runs if not (run["model_dir"] / "checkpoints" / "best.pt").exists()]

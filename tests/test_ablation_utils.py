@@ -59,7 +59,7 @@ def test_ablation_config_generates_45_regularized_models_and_one_baseline(tmp_pa
     assert len(ordinary_runs) == 1
     assert len({run["model_id"] for run in runs}) == 46
     assert {(run["eta"], run["m"], run["s"]) for run in regularized_runs} == {(eta, m, s) for eta in config["eta_values"] for m in config["m_values"] for s in config["s_values"]}
-    assert all(run["mode"] == "output_gram" for run in regularized_runs)
+    assert all(run["mode"] == config["regularizer_mode"] for run in regularized_runs)
     assert all(run["config_path"].is_file() for run in runs)
     assert base_config["pretrained_model"] == source_checkpoint
 
@@ -68,7 +68,7 @@ def test_ablation_config_generates_45_regularized_models_and_one_baseline(tmp_pa
             generated_config = yaml.safe_load(file)
 
         regularizer_config = generated_config["lora"]["regularizer"]
-        assert regularizer_config["mode"] == "output_gram"
+        assert regularizer_config["mode"] == config["regularizer_mode"]
         assert regularizer_config["transformation_strength"] == run["s"]
         assert len(regularizer_config["transformations"]) == run["m"]
 
@@ -110,19 +110,24 @@ def test_best_models_use_validation_metrics_and_the_99_percent_lora_rule():
         {"model_id": "source", "eta": 1000.0, "validation_target_gain": 0.098, "validation_source_degradation": 0.01},
     ]
 
-    selected, required_target_gain = select_best_models(results)
+    selected, selection_summary = select_best_models(results)
 
-    assert required_target_gain == pytest.approx(0.099)
+    assert selection_summary["required_target_gain"] == pytest.approx(0.099)
+    assert selection_summary["num_eligible_models"] == 2
     assert selected["best_target_gain"]["model_id"] == "target"
     assert selected["best_source_degradation"]["model_id"] == "source"
     assert selected["best_overall"]["model_id"] == "overall"
 
 
-def test_best_model_selection_fails_when_no_model_reaches_the_target_rule():
+def test_best_model_selection_records_when_no_model_reaches_the_target_rule():
     results = [
         {"eta": 0.0, "validation_target_gain": 0.10, "validation_source_degradation": 0.05},
         {"eta": 10.0, "validation_target_gain": 0.09, "validation_source_degradation": 0.01},
     ]
 
-    with pytest.raises(ValueError, match="No regularized model reaches 99%"):
-        select_best_models(results)
+    selected, selection_summary = select_best_models(results)
+
+    assert selected["best_overall"] is None
+    assert selected["best_target_gain"] == results[1]
+    assert selection_summary["num_eligible_models"] == 0
+    assert selection_summary["best_regularized_target_fraction"] == pytest.approx(0.9)

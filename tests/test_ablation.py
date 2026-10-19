@@ -1,6 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 
+import csv
 import pytest
 import torch
 
@@ -170,6 +171,25 @@ def test_prepare_dataset_caches_runs_once_per_seed(tmp_path, monkeypatch):
     ablation.prepare_dataset_caches(runs)
 
     assert prepared_seeds == [42, 43]
+
+
+def test_load_saved_results_restores_metric_types(tmp_path):
+    metrics_path = tmp_path / "metrics.csv"
+    row = {"model_id": "abc", "model_dir": "model", "config_path": "config.yaml", "seed": 42, "eta": 10.0, "mode": "encoder_response", "m": 5, "s": 0.1, "subset": "rotation", "extra_run": False, "validation_target_gain": 0.02}
+
+    with open(metrics_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+
+    loaded_row = Ablation.load_saved_results(metrics_path)["abc"]
+
+    assert loaded_row["seed"] == 42
+    assert loaded_row["m"] == 5
+    assert loaded_row["eta"] == 10.0
+    assert loaded_row["s"] == 0.1
+    assert loaded_row["validation_target_gain"] == 0.02
+    assert loaded_row["extra_run"] is False
 
 
 def test_score_split_computes_target_gain_and_source_degradation(monkeypatch):
