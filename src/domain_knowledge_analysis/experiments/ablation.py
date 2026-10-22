@@ -209,9 +209,11 @@ class Ablation:
         num_images = int(self.ablation_config["num_qualitative_images"])
 
         ordinary_run = next(run for run in self.runs if run["seed"] == seed and run["eta"] == 0)
+        source_loss_run = next(run for run in self.runs if run["seed"] == seed and run["mode"] == "source_loss")
         regularized_run = next(run for run in self.runs if run["model_id"] == selected_model["model_id"])
 
         ordinary_experiment = self.load_or_train(ordinary_run)
+        source_loss_experiment = self.load_or_train(source_loss_run)
         regularized_experiment = self.load_or_train(regularized_run)
         transformation_config = ordinary_experiment.config["lora"]["transformed_dataset"]
         source_dataloader = utils.create_testing_dataloaders(ordinary_experiment.config)
@@ -233,6 +235,11 @@ class Ablation:
         lora_target = ordinary_experiment.model.reconstruct_images(target_images).cpu()
         lora_generated = ordinary_experiment.model.generate_images(num_images, latents).cpu()
 
+        source_loss_experiment.lora_manager.enable_adapters()
+        source_loss_source = source_loss_experiment.model.reconstruct_images(source_images).cpu()
+        source_loss_target = source_loss_experiment.model.reconstruct_images(target_images).cpu()
+        source_loss_generated = source_loss_experiment.model.generate_images(num_images, latents).cpu()
+
         regularized_experiment.lora_manager.enable_adapters()
         regularized_source = regularized_experiment.model.reconstruct_images(source_images).cpu()
         regularized_target = regularized_experiment.model.reconstruct_images(target_images).cpu()
@@ -240,12 +247,13 @@ class Ablation:
         responses = self.create_model_responses(ordinary_experiment, regularized_experiment, source_images, selected_model)
 
         ordinary_experiment.logger.close()
+        source_loss_experiment.logger.close()
         regularized_experiment.logger.close()
 
         return {
-            "source": {"input": source_images, "base": base_source, "lora": lora_source, "regularized": regularized_source},
-            "target": {"input": target_images, "base": base_target, "lora": lora_target, "regularized": regularized_target},
-            "generation": {"base": base_generated, "lora": lora_generated, "regularized": regularized_generated},
+            "source": {"input": source_images, "base": base_source, "lora": lora_source, "source_loss": source_loss_source, "regularized": regularized_source},
+            "target": {"input": target_images, "base": base_target, "lora": lora_target, "source_loss": source_loss_target, "regularized": regularized_target},
+            "generation": {"base": base_generated, "lora": lora_generated, "source_loss": source_loss_generated, "regularized": regularized_generated},
             "responses": responses,
             "selected_model": selected_model,
         }

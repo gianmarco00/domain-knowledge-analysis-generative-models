@@ -48,20 +48,29 @@ def test_named_transformations_keep_requested_order_and_values():
     assert transformations[2]["intensity"] == 1.2
 
 
-def test_ablation_config_generates_45_regularized_models_and_one_baseline(tmp_path):
+def test_ablation_config_generates_the_grid_source_loss_and_one_baseline(tmp_path):
     base_config, config = load_configs()
     source_checkpoint = base_config["pretrained_model"]
     runs = generate_model_runs(base_config, config, tmp_path)
-    regularized_runs = [run for run in runs if run["eta"] != 0]
+    regularized_runs = [run for run in runs if run["mode"] == config["regularizer_mode"]]
+    source_loss_run = next(run for run in runs if run["mode"] == "source_loss")
     ordinary_runs = [run for run in runs if run["eta"] == 0]
 
     assert len(regularized_runs) == 45
     assert len(ordinary_runs) == 1
-    assert len({run["model_id"] for run in runs}) == 46
+    assert len({run["model_id"] for run in runs}) == 47
     assert {(run["eta"], run["m"], run["s"]) for run in regularized_runs} == {(eta, m, s) for eta in config["eta_values"] for m in config["m_values"] for s in config["s_values"]}
     assert all(run["mode"] == config["regularizer_mode"] for run in regularized_runs)
     assert all(run["config_path"].is_file() for run in runs)
     assert base_config["pretrained_model"] == source_checkpoint
+    assert (source_loss_run["eta"], source_loss_run["m"], source_loss_run["s"]) == (1.0, 0, 0.0)
+
+    with open(source_loss_run["config_path"]) as file:
+        source_loss_config = yaml.safe_load(file)["lora"]["regularizer"]
+
+    assert source_loss_config["mode"] == "source_loss"
+    assert source_loss_config["transformations"] == []
+    assert "transformation_strength" not in source_loss_config
 
     for run in regularized_runs:
         with open(run["config_path"]) as file:
@@ -108,6 +117,7 @@ def test_best_models_use_validation_metrics_and_the_99_percent_lora_rule():
         {"model_id": "target", "eta": 10.0, "validation_target_gain": 0.101, "validation_source_degradation": 0.04},
         {"model_id": "overall", "eta": 100.0, "validation_target_gain": 0.099, "validation_source_degradation": 0.02},
         {"model_id": "source", "eta": 1000.0, "validation_target_gain": 0.098, "validation_source_degradation": 0.01},
+        {"model_id": "source_loss", "mode": "source_loss", "eta": 1.0, "validation_target_gain": 0.2, "validation_source_degradation": 0.0},
     ]
 
     selected, selection_summary = select_best_models(results)

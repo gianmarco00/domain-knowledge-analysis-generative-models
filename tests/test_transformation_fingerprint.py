@@ -1,6 +1,8 @@
 import pytest
 import torch
 
+from domain_knowledge_analysis.losses import VAELoss
+from domain_knowledge_analysis.math import bernoulli_log_prob_from_logits
 from domain_knowledge_analysis.models.vae import Vae
 from domain_knowledge_analysis.regularizers import TFRegularizer
 
@@ -70,6 +72,18 @@ class DummyVAE(torch.nn.Module):
     def deterministic_forward(self, x):
         mean, _ = self.encoder(x)
         return self.decoder_distribution(self.decoder(mean), self.decoder_distribution_name)
+
+
+class DummySourceVAE(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor(0.5))
+
+    def forward(self, x):
+        logits = self.weight * x
+        mean = self.weight * x.flatten(start_dim=1)[:, :2]
+        log_variance = torch.zeros_like(mean)
+        return logits, mean, log_variance
 
 
 class AddPattern:
@@ -202,6 +216,33 @@ def test_regularizer_loss_still_backpropagates_after_batched_calibration():
     assert loss.requires_grad
     assert model.weight.grad is not None
     assert torch.isfinite(model.weight.grad)
+
+
+def test_source_loss_uses_the_training_loss_on_one_anchor_minibatch():
+    anchor_points = torch.rand(12, 1, 2, 2)
+    model = DummySourceVAE()
+    loss = VAELoss(bernoulli_log_prob_from_logits, beta=1.7)
+    regularizer = TFRegularizer(model, DummyLoRAManager(model), None, anchor_points, mode="source_loss", loss=loss)
+    regularizer.anchor_indices = torch.arange(len(anchor_points))
+    regularizer.anchor_position = 0
+    source_x = anchor_points[:10]
+    expected = loss(source_x, *model(source_x))
+    actual = regularizer()
+
+    torch.testing.assert_close(actual, expected)
+    assert regularizer.anchor_position == 10
+    assert not hasattr(regularizer, "transformed_x")
+
+    actual.backward()
+    assert torch.isfinite(model.weight.grad)
+
+
+def test_source_loss_requires_the_training_loss():
+    anchor_points = torch.rand(7, 1, 2, 2)
+    model = DummySourceVAE()
+
+    with pytest.raises(ValueError, match="training loss"):
+        TFRegularizer(model, DummyLoRAManager(model), None, anchor_points, mode="source_loss")
 
 
 def test_regularizer_loss_averages_all_gram_entries():

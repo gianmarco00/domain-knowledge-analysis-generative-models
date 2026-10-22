@@ -7,6 +7,7 @@ from matplotlib.lines import Line2D
 class AblationPlotter:
     REGULARIZED_COLOR = "#0072B2"
     ORDINARY_COLOR = "#7A7A7A"
+    SOURCE_LOSS_COLOR = "#CC79A7"
 
     def __init__(self, output_dir, config):
         self.output_dir = Path(output_dir) / "figures"
@@ -23,7 +24,8 @@ class AblationPlotter:
         self.plot_metric_pair(results, "s", "m", "Transformation strength s", "M", "Effect of transformation strength", "figure_3_transformation_strength.png")
 
     def plot_metric_pair(self, results, x_name, color_name, x_label, color_label, title, filename):
-        regularized_rows = [row for row in results if float(row["eta"]) != 0]
+        regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
+        source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
         ordinary_rows = [row for row in results if float(row["eta"]) == 0]
         color_values = sorted({float(row[color_name]) for row in regularized_rows})
         colors = {value: plt.get_cmap("tab10")(index) for index, value in enumerate(color_values)}
@@ -36,20 +38,22 @@ class AblationPlotter:
                 axis.scatter([float(row[x_name]) for row in rows], [1000 * float(row[metric]) for row in rows], s=55, color=colors[color_value], edgecolor="white", linewidth=0.6, alpha=0.8)
 
             axis.scatter([0.0] * len(ordinary_rows), [1000 * float(row[metric]) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
+            axis.scatter([float(row[x_name]) for row in source_loss_rows], [1000 * float(row[metric]) for row in source_loss_rows], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, zorder=4)
             axis.axhline(0, color="0.75", linewidth=0.8)
             axis.set_xlabel(x_label)
             axis.set_ylabel(y_label)
             axis.grid(color="0.9", linestyle="--", linewidth=0.7)
 
             if x_name in {"eta", "s"}:
-                positive_values = sorted({float(row[x_name]) for row in regularized_rows})
+                positive_values = sorted({float(row[x_name]) for row in regularized_rows + source_loss_rows if float(row[x_name]) > 0})
                 axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
                 axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
             else:
-                axis.set_xticks(sorted({0, *[int(row[x_name]) for row in regularized_rows]}))
+                axis.set_xticks(sorted({0, *[int(row[x_name]) for row in regularized_rows + source_loss_rows]}))
 
         handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[value], markeredgecolor="white", markersize=8, label=f"{value:g}") for value in color_values]
         handles.append(Line2D([0], [0], marker="D", color="none", markerfacecolor=self.ORDINARY_COLOR, markersize=8, label="Ordinary LoRA"))
+        handles.append(Line2D([0], [0], marker="*", color="none", markerfacecolor=self.SOURCE_LOSS_COLOR, markersize=12, label="Source-loss LoRA"))
         axes[1].legend(handles=handles, title=color_label, loc="best")
         figure.suptitle(title)
         figure.tight_layout()
@@ -57,11 +61,13 @@ class AblationPlotter:
         plt.close(figure)
 
     def plot_figure_4(self, results):
-        regularized_rows = [row for row in results if float(row["eta"]) != 0]
+        regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
+        source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
         ordinary_rows = [row for row in results if float(row["eta"]) == 0]
         figure, axis = plt.subplots(figsize=(7.5, 6))
         axis.scatter([1000 * float(row["test_source_degradation"]) for row in regularized_rows], [1000 * float(row["test_target_gain"]) for row in regularized_rows], s=58, color=self.REGULARIZED_COLOR, edgecolor="white", linewidth=0.6, alpha=0.8, label="Regularized LoRA")
         axis.scatter([1000 * float(row["test_source_degradation"]) for row in ordinary_rows], [1000 * float(row["test_target_gain"]) for row in ordinary_rows], s=82, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA", zorder=3)
+        axis.scatter([1000 * float(row["test_source_degradation"]) for row in source_loss_rows], [1000 * float(row["test_target_gain"]) for row in source_loss_rows], s=160, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, label="Source-loss LoRA", zorder=4)
         axis.set_xlabel("Source degradation (×10⁻³) ↓")
         axis.set_ylabel("Target gain (×10⁻³) ↑")
         axis.set_title("Target learning versus source preservation")
@@ -79,9 +85,9 @@ class AblationPlotter:
         self.plot_model_responses(results["responses"])
 
     def plot_reconstructions(self, results, title, filename, selected_label):
-        columns = [("input", "Input"), ("base", "Original VAE"), ("lora", "LoRA"), ("regularized", f"Regularized LoRA\n{selected_label}")]
+        columns = [("input", "Input"), ("base", "Original VAE"), ("lora", "LoRA"), ("source_loss", "Source-loss LoRA"), ("regularized", f"Regularized LoRA\n{selected_label}")]
         num_images = len(results["input"])
-        figure, axes = plt.subplots(num_images, len(columns), figsize=(8, 2 * num_images), squeeze=False)
+        figure, axes = plt.subplots(num_images, len(columns), figsize=(10, 2 * num_images), squeeze=False)
 
         for row in range(num_images):
             for column, (key, label) in enumerate(columns):
@@ -96,9 +102,9 @@ class AblationPlotter:
         plt.close(figure)
 
     def plot_generations(self, results, selected_label):
-        columns = [("base", "Original VAE"), ("lora", "LoRA"), ("regularized", f"Regularized LoRA\n{selected_label}")]
+        columns = [("base", "Original VAE"), ("lora", "LoRA"), ("source_loss", "Source-loss LoRA"), ("regularized", f"Regularized LoRA\n{selected_label}")]
         num_images = len(results["base"])
-        figure, axes = plt.subplots(num_images, len(columns), figsize=(6, 2 * num_images), squeeze=False)
+        figure, axes = plt.subplots(num_images, len(columns), figsize=(8, 2 * num_images), squeeze=False)
 
         for row in range(num_images):
             for column, (key, label) in enumerate(columns):

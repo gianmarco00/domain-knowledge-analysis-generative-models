@@ -4,12 +4,16 @@ from domain_knowledge_analysis.plotting import AblationPlotter
 
 
 def make_results():
-    results = [{"eta": 0.0, "m": 0, "s": 0.0, "test_target_gain": 0.08, "test_source_degradation": 0.04}]
+    results = [
+        {"mode": "ordinary_lora", "eta": 0.0, "m": 0, "s": 0.0, "test_target_gain": 0.08, "test_source_degradation": 0.04},
+        {"mode": "source_loss", "eta": 1.0, "m": 0, "s": 0.0, "test_target_gain": 0.075, "test_source_degradation": 0.01},
+    ]
 
     for eta in [10.0, 100.0]:
         for m in [5, 10]:
             for strength in [0.01, 0.5]:
                 results.append({
+                    "mode": "output_gram",
                     "eta": eta,
                     "m": m,
                     "s": strength,
@@ -37,9 +41,9 @@ def test_ablation_plotter_saves_the_four_qualitative_figures(tmp_path):
     selected_model = {"mode": "output_gram", "m": 10, "eta": 1000.0, "s": 0.1}
     images = torch.rand(2, 1, 8, 8)
     qualitative_results = {
-        "source": {"input": images, "base": images, "lora": images, "regularized": images},
-        "target": {"input": images, "base": images, "lora": images, "regularized": images},
-        "generation": {"base": images, "lora": images, "regularized": images},
+        "source": {"input": images, "base": images, "lora": images, "source_loss": images, "regularized": images},
+        "target": {"input": images, "base": images, "lora": images, "source_loss": images, "regularized": images},
+        "generation": {"base": images, "lora": images, "source_loss": images, "regularized": images},
         "responses": {
             "input": images,
             "transformed": torch.rand(2, 2, 1, 8, 8),

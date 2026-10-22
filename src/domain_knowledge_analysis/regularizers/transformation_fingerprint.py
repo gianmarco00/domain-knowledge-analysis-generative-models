@@ -6,9 +6,9 @@ from domain_knowledge_analysis.utils.utils import INPUT_SCALE_FLOOR, RMS_ABSOLUT
 
 
 class TFRegularizer(torch.nn.Module):
-    VALID_MODES = {"output_gram", "encoder_response", "encoder_gram"}
+    VALID_MODES = {"output_gram", "encoder_response", "encoder_gram", "source_loss"}
 
-    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0):
+    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0, loss=None):
         super().__init__()
 
         if mode not in self.VALID_MODES:
@@ -24,12 +24,21 @@ class TFRegularizer(torch.nn.Module):
         self.response_weight = float(response_weight)
         self.decoder_weight = float(decoder_weight)
         self.decoder_seed = int(decoder_seed)
-        self.transformations_functions, _ = transformations
-        self.num_transformations = len(self.transformations_functions)
         self.x = anchor_points
         self.num_anchor_points = len(self.x)
         self.anchor_batch_size = anchor_batch_size
         self.calibration_batch_size = calibration_batch_size
+
+        if self.mode == "source_loss":
+            if loss is None:
+                raise ValueError("source_loss mode requires the training loss.")
+
+            self.loss = loss
+            self.shuffle_anchor_indices()
+            return
+
+        self.transformations_functions, _ = transformations
+        self.num_transformations = len(self.transformations_functions)
         self.target_input_rms = float(target_input_rms) if target_input_rms is not None else None
         self.target_input_scales = torch.as_tensor(target_input_scales, dtype=self.x.dtype, device=self.x.device) if target_input_scales is not None else None
         self.transformed_x = self.apply_transform(self.x)
@@ -200,6 +209,10 @@ class TFRegularizer(torch.nn.Module):
 
     def forward(self):
         anchor_indices = self.sample_anchor_indices()
+
+        if self.mode == "source_loss":
+            source_x = self.x[anchor_indices]
+            return self.loss(source_x, *self.model(source_x))
 
         if self.mode == "output_gram":
             current_gram_matrices = self.gram_matrix(anchor_indices)

@@ -37,12 +37,23 @@ def create_training_config(base_config, seed, eta, transformation_families, tran
     config["seed"] = int(seed)
     config["lora"]["pretrained_model"] = None
 
-    if float(eta) == 0 or not transformation_families:
+    if float(eta) == 0 or (not transformation_families and regularizer_mode != "source_loss"):
         config["lora"]["regularizer"] = None
         return config
 
     regularizer_config = deepcopy(base_config["lora"]["regularizer"])
     regularizer_config["eta"] = float(eta)
+
+    if regularizer_mode == "source_loss":
+        regularizer_config["mode"] = regularizer_mode
+        regularizer_config["transformations"] = []
+        regularizer_config.pop("transformation_strength", None)
+        regularizer_config.pop("target_input_rms", None)
+        regularizer_config.pop("calibration", None)
+        regularizer_config.pop("transformation_implementation_version", None)
+        config["lora"]["regularizer"] = regularizer_config
+        return config
+
     regularizer_config["transformations"] = deepcopy(transformation_families)
     regularizer_config["transformation_implementation_version"] = TRANSFORMATION_IMPLEMENTATION_VERSION
 
@@ -79,7 +90,8 @@ def generate_model_runs(base_config, ablation_config, output_dir):
     runs = {}
 
     def add_run(seed, eta, subset, strength=0.0, mode=regularizer_mode, extra_run=False):
-        config = create_training_config(base_config, seed, eta, subset, strength if subset else None, mode if subset else None)
+        is_regularized = float(eta) != 0
+        config = create_training_config(base_config, seed, eta, subset, strength if subset else None, mode if is_regularized else None)
         model_id = training_config_id(config)
 
         if model_id in runs:
@@ -98,7 +110,7 @@ def generate_model_runs(base_config, ablation_config, output_dir):
             "config_path": config_path,
             "seed": int(seed),
             "eta": float(eta),
-            "mode": mode if subset else "ordinary_lora",
+            "mode": mode if is_regularized else "ordinary_lora",
             "m": m,
             "s": float(strength) if subset else 0.0,
             "subset": transformation_name(subset),
@@ -116,9 +128,9 @@ def generate_model_runs(base_config, ablation_config, output_dir):
                     add_run(seed, eta, subset, strength)
 
     for extra_run in ablation_config.get("extra_runs", []):
-        subset = select_named_transformations(ablation_config, extra_run["transformations"])
         mode = extra_run.get("mode", regularizer_mode)
-        strength = extra_run.get("s", extra_run.get("transformation_strength"))
+        subset = [] if mode == "source_loss" else select_named_transformations(ablation_config, extra_run["transformations"])
+        strength = 0.0 if mode == "source_loss" else extra_run.get("s", extra_run.get("transformation_strength"))
 
         if strength is None:
             raise ValueError("Every custom ablation run must define s.")
@@ -145,7 +157,7 @@ def select_best_models(results, target_gain_fraction=0.99):
         raise ValueError("target_gain_fraction must be in (0, 1].")
 
     ordinary_rows = [row for row in results if float(row["eta"]) == 0]
-    regularized_rows = [row for row in results if float(row["eta"]) != 0]
+    regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
 
     if not ordinary_rows or not regularized_rows:
         raise ValueError("Best-model selection needs ordinary LoRA and regularized LoRA results.")

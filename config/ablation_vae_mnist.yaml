@@ -1,16 +1,17 @@
 base_config: config/lora_vae_mnist.yaml
 
 ablation:
-  output_dir: ablations/vae_mnist_rotated_mnist_encoder_gram
+  output_dir: ablations/vae_mnist_rotated_mnist_output_gram
   parallel_models: 2
 
-  regularizer_mode: encoder_gram
+  regularizer_mode: output_gram
   seeds: [42]
   eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0]
   m_values: [5, 10, 20]
   s_values: [0.01, 0.1, 0.5]
-  # Custom runs accept seed, eta, mode, s and an ordered list of transformation names.
-  extra_runs: []
+  # Transformation runs also accept s and an ordered list of transformation names.
+  extra_runs:
+    - {seed: 42, eta: 1.0, mode: source_loss}
   target_gain_fraction: 0.99
 
   visual_seed: 123
