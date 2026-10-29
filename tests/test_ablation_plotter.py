@@ -5,8 +5,8 @@ from domain_knowledge_analysis.plotting import AblationPlotter
 
 def make_results():
     results = [
-        {"mode": "ordinary_lora", "eta": 0.0, "m": 0, "s": 0.0, "test_target_gain": 0.08, "test_source_degradation": 0.04},
-        {"mode": "source_loss", "eta": 1.0, "m": 0, "s": 0.0, "test_target_gain": 0.075, "test_source_degradation": 0.01},
+        {"mode": "ordinary_lora", "eta": 0.0, "m": 0, "s": 0.0, "test_target_gain": 0.08, "test_source_degradation": 0.04, "test_target_fid": 100.0},
+        {"mode": "source_loss", "eta": 1.0, "m": 0, "s": 0.0, "test_target_gain": 0.075, "test_source_degradation": 0.01, "test_target_fid": 95.0},
     ]
 
     for eta in [10.0, 100.0]:
@@ -19,6 +19,7 @@ def make_results():
                     "s": strength,
                     "test_target_gain": 0.08 - eta / 100000 - strength / 1000,
                     "test_source_degradation": 0.04 - m / 1000,
+                    "test_target_fid": 90.0,
                 })
 
     return results
@@ -30,11 +31,13 @@ def test_ablation_plotter_saves_the_four_metric_figures(tmp_path):
     plotter.plot_figure_2(make_results())
     plotter.plot_figure_3(make_results())
     plotter.plot_figure_4(make_results())
+    plotter.plot_fid(make_results())
 
     assert (tmp_path / "figures" / "figure_1_eta.png").is_file()
     assert (tmp_path / "figures" / "figure_2_transformation_count.png").is_file()
     assert (tmp_path / "figures" / "figure_3_transformation_strength.png").is_file()
     assert (tmp_path / "figures" / "figure_4_target_source_tradeoff.png").is_file()
+    assert (tmp_path / "figures" / "figure_9_target_fid.png").is_file()
 
 
 def test_ablation_plotter_saves_the_four_qualitative_figures(tmp_path):

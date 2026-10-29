@@ -6,6 +6,8 @@ requires-python = ">=3.10"
 dependencies = [
     "torch",
     "torchvision",
+    "torchmetrics",
+    "torch-fidelity",
     "pyyaml",
     "tensorboard",
     "tqdm",

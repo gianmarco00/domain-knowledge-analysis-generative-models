@@ -77,6 +77,41 @@ class AblationPlotter:
         figure.savefig(self.output_dir / "figure_4_target_source_tradeoff.png", dpi=200)
         plt.close(figure)
 
+    def plot_fid(self, results):
+        regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
+        source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
+        ordinary_rows = [row for row in results if float(row["eta"]) == 0]
+        m_values = sorted({int(row["m"]) for row in regularized_rows})
+        strengths = sorted({float(row["s"]) for row in regularized_rows})
+        colors = {value: plt.get_cmap("tab10")(index % 10) for index, value in enumerate(m_values)}
+        markers = ["o", "s", "^", "v", "P", "X", "<", ">", "h", "p"]
+        figure, axis = plt.subplots(figsize=(8, 5))
+
+        for m in m_values:
+            for index, strength in enumerate(strengths):
+                rows = [row for row in regularized_rows if int(row["m"]) == m and float(row["s"]) == strength]
+                axis.scatter([float(row["eta"]) for row in rows], [float(row["test_target_fid"]) for row in rows], s=55, color=colors[m], marker=markers[index % len(markers)], edgecolor="white", linewidth=0.6, alpha=0.8)
+
+        axis.scatter([0.0] * len(ordinary_rows), [float(row["test_target_fid"]) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA")
+        axis.scatter([float(row["eta"]) for row in source_loss_rows], [float(row["test_target_fid"]) for row in source_loss_rows], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, label="Source-loss LoRA")
+        positive_values = sorted({float(row["eta"]) for row in regularized_rows + source_loss_rows if float(row["eta"]) > 0})
+
+        if positive_values:
+            axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
+            axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
+
+        handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[m], markeredgecolor="white", markersize=8, label=f"M={m}") for m in m_values]
+        handles += [Line2D([0], [0], marker=markers[index % len(markers)], color="none", markerfacecolor="0.4", markeredgecolor="white", markersize=8, label=f"s={strength:g}") for index, strength in enumerate(strengths)]
+        baseline_handles, _ = axis.get_legend_handles_labels()
+        axis.legend(handles=handles + baseline_handles, loc="best")
+        axis.set_xlabel("η")
+        axis.set_ylabel("Target FID ↓")
+        axis.set_title("Generated images versus held-out rotated MNIST")
+        axis.grid(color="0.9", linestyle="--", linewidth=0.7)
+        figure.tight_layout()
+        figure.savefig(self.output_dir / "figure_9_target_fid.png", dpi=200)
+        plt.close(figure)
+
     def plot_qualitative(self, results):
         selected_label = self.selected_model_label(results["selected_model"])
         self.plot_reconstructions(results["source"], "Clean MNIST reconstructions", "figure_5_source_reconstructions.png", selected_label)

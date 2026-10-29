@@ -15,6 +15,7 @@ ablation:
   target_gain_fraction: 0.99
 
   visual_seed: 123
+  fid_seed: 123
   num_qualitative_images: 6
   num_response_images: 2
   response_transformations: [horizontal_translation, vertical_translation, isotropic_scale, aspect_ratio_deformation]

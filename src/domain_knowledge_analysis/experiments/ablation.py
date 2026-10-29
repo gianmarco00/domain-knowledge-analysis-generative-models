@@ -47,32 +47,46 @@ class Ablation:
         metrics_path = self.output_dir / "results" / "metrics.csv"
         saved_results = self.load_saved_results(metrics_path)
 
+        for row in saved_results.values():
+            row.setdefault("test_target_fid", "")
+            row.setdefault("fid_seed", "")
+
         for index, run in enumerate(self.runs):
             print(f"\nModel {index + 1}/{len(self.runs)}: {run['model_dir'].name}")
 
-            if run["model_id"] in saved_results:
+            if run["model_id"] in saved_results and saved_results[run["model_id"]]["test_target_fid"] != "" and saved_results[run["model_id"]]["fid_seed"] == int(self.ablation_config["fid_seed"]):
                 print("Using saved metrics.")
                 results.append(saved_results[run["model_id"]])
                 continue
 
             experiment = self.load_or_train(run)
-            metrics = self.evaluate(experiment)
+            if run["model_id"] in saved_results:
+                print("Computing missing FID.")
+                transformation_config = experiment.config["lora"]["transformed_dataset"]
+                target_test_dataloader = utils.create_testing_dataloaders(experiment.config, transformation_config)
+                row = saved_results[run["model_id"]]
+                row["test_target_fid"] = self.score_fid(experiment, target_test_dataloader)
+                row["fid_seed"] = int(self.ablation_config["fid_seed"])
+            else:
+                metrics = self.evaluate(experiment)
 
-            results.append({
-                "model_id": run["model_id"],
-                "model_dir": str(run["model_dir"]),
-                "config_path": str(run["config_path"]),
-                "seed": run["seed"],
-                "eta": run["eta"],
-                "mode": run["mode"],
-                "m": run["m"],
-                "s": run["s"],
-                "subset": run["subset"],
-                "extra_run": run["extra_run"],
-                **metrics,
-            })
+                row = {
+                    "model_id": run["model_id"],
+                    "model_dir": str(run["model_dir"]),
+                    "config_path": str(run["config_path"]),
+                    "seed": run["seed"],
+                    "eta": run["eta"],
+                    "mode": run["mode"],
+                    "m": run["m"],
+                    "s": run["s"],
+                    "subset": run["subset"],
+                    "extra_run": run["extra_run"],
+                    **metrics,
+                }
 
-            save_rows(results, metrics_path)
+            results.append(row)
+            saved_results[run["model_id"]] = row
+            save_rows(list(saved_results.values()), metrics_path)
             experiment.logger.close()
             del experiment
 
@@ -88,6 +102,7 @@ class Ablation:
         plotter.plot_figure_2(results)
         plotter.plot_figure_3(results)
         plotter.plot_figure_4(results)
+        plotter.plot_fid(results)
         plotter.plot_qualitative(self.create_qualitative_results(selected_model))
 
         print("\nBest regularized models:")
@@ -117,11 +132,11 @@ class Ablation:
 
         for row in rows:
             for key, value in row.items():
-                if key in {"seed", "m"}:
+                if key in {"seed", "m", "fid_seed"} and value != "":
                     row[key] = int(value)
                 elif key == "extra_run":
                     row[key] = value == "True"
-                elif key not in text_fields:
+                elif key not in text_fields and value != "":
                     row[key] = float(value)
 
         return {row["model_id"]: row for row in rows}
@@ -184,7 +199,28 @@ class Ablation:
         return {
             **{f"validation_{name}": value for name, value in validation_metrics.items()},
             **{f"test_{name}": value for name, value in test_metrics.items()},
+            "test_target_fid": self.score_fid(experiment, target_test_dataloader),
+            "fid_seed": int(self.ablation_config["fid_seed"]),
         }
+
+    def score_fid(self, experiment, target_dataloader):
+        from torchmetrics.image.fid import FrechetInceptionDistance
+
+        device = experiment.device if experiment.device.type == "cuda" else torch.device("cpu")
+        fid = FrechetInceptionDistance(feature=2048, normalize=True).set_dtype(torch.float64).to(device)
+        generator = utils.create_random_generator(self.ablation_config["fid_seed"])
+        latent_dim = experiment.model.encoder_params["latent_dim"]
+        experiment.lora_manager.enable_adapters()
+        experiment.model.eval()
+
+        with torch.no_grad():
+            for images, _ in target_dataloader:
+                latents = utils.sample_random_latents(len(images), latent_dim, generator)
+                generated = experiment.model.generate_images(len(images), latents)
+                fid.update(images.to(device).repeat(1, 3, 1, 1), real=True)
+                fid.update(generated.to(device).clamp(0, 1).repeat(1, 3, 1, 1), real=False)
+
+        return fid.compute().item()
 
     def score_split(self, experiment, target_dataloader, source_dataloader):
         scorer = AdaptationScorer(experiment.model, experiment.lora_manager, target_dataloader, source_dataloader, experiment.config, experiment.device)

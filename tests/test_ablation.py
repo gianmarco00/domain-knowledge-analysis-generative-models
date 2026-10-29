@@ -1,5 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import csv
 import pytest
@@ -213,6 +215,107 @@ def test_score_split_computes_target_gain_and_source_degradation(monkeypatch):
 
     assert metrics["target_gain"] == pytest.approx(0.20)
     assert metrics["source_degradation"] == pytest.approx(0.03)
+
+
+def test_fid_uses_target_test_images_and_prior_samples_with_adapters(monkeypatch):
+    from torchmetrics.image import fid as fid_module
+
+    class FakeFID:
+        instances = []
+
+        def __init__(self, feature, normalize):
+            assert feature == 2048
+            assert normalize is True
+            self.real = []
+            self.fake = []
+            self.__class__.instances.append(self)
+
+        def set_dtype(self, dtype):
+            assert dtype == torch.float64
+            return self
+
+        def to(self, device):
+            return self
+
+        def update(self, images, real):
+            (self.real if real else self.fake).append(images.clone())
+
+        def compute(self):
+            return torch.tensor(12.5)
+
+    class FakeModel:
+        encoder_params = {"latent_dim": 2}
+
+        def __init__(self, manager):
+            self.manager = manager
+            self.latents = []
+
+        def eval(self):
+            pass
+
+        def generate_images(self, count, latents):
+            assert self.manager.enabled
+            assert not torch.is_grad_enabled()
+            self.latents.append(latents.clone())
+            return torch.full((count, 1, 2, 2), 0.75)
+
+    monkeypatch.setattr(fid_module, "FrechetInceptionDistance", FakeFID)
+    images = torch.arange(20, dtype=torch.float32).reshape(5, 1, 2, 2) / 20
+    dataloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(images, torch.zeros(5)), batch_size=2)
+    manager = FakeLoRAManager()
+    model = FakeModel(manager)
+    experiment = type("Experiment", (), {"model": model, "lora_manager": manager, "device": torch.device("cpu")})()
+    ablation = Ablation.__new__(Ablation)
+    ablation.ablation_config = {"fid_seed": 123}
+
+    assert ablation.score_fid(experiment, dataloader) == 12.5
+    first_latents = torch.cat(model.latents)
+    assert ablation.score_fid(experiment, dataloader) == 12.5
+    torch.testing.assert_close(torch.cat(model.latents[3:]), first_latents)
+    torch.testing.assert_close(torch.cat(FakeFID.instances[0].real), images.repeat(1, 3, 1, 1))
+    torch.testing.assert_close(torch.cat(FakeFID.instances[0].fake), torch.full((5, 3, 2, 2), 0.75))
+
+
+def test_load_saved_results_accepts_missing_fid_for_interrupted_migration(tmp_path):
+    metrics_path = tmp_path / "metrics.csv"
+    row = {"model_id": "abc", "seed": 42, "m": 5, "extra_run": False, "test_target_fid": ""}
+
+    with open(metrics_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+
+    assert Ablation.load_saved_results(metrics_path)["abc"]["test_target_fid"] == ""
+
+
+def test_fid_migration_preserves_unprocessed_saved_metrics(tmp_path, monkeypatch):
+    metrics_path = tmp_path / "results" / "metrics.csv"
+    metrics_path.parent.mkdir()
+    rows = [{"model_id": name, "seed": 42, "m": 5, "extra_run": False, "validation_target_gain": 0.1} for name in ["first", "second"]]
+
+    with open(metrics_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    experiment = SimpleNamespace(config={"lora": {"transformed_dataset": {}}}, logger=FakeLogger())
+    ablation = Ablation.__new__(Ablation)
+    ablation.output_dir = tmp_path
+    ablation.ablation_config = {"fid_seed": 123}
+    ablation.runs = [{"model_id": name, "model_dir": tmp_path / name} for name in ["first", "second"]]
+    ablation.train_models = Mock()
+    ablation.load_or_train = Mock(side_effect=[experiment, RuntimeError("interrupted")])
+    ablation.score_fid = Mock(return_value=12.5)
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_testing_dataloaders", Mock(return_value=object()))
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        ablation.run()
+
+    saved = ablation.load_saved_results(metrics_path)
+    assert saved["first"]["test_target_fid"] == 12.5
+    assert saved["first"]["fid_seed"] == 123
+    assert saved["second"]["test_target_fid"] == ""
+    assert saved["second"]["validation_target_gain"] == 0.1
 
 
 def test_model_responses_are_output_differences_for_both_models(monkeypatch):
