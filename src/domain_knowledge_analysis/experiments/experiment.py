@@ -10,8 +10,11 @@ from pathlib import Path
 
 
 class Experiment():
-    def __init__(self, config_path):
+    def __init__(self, config_path, progress_position=None, progress_description="Training", progress_stream=None):
 
+        self.progress_position = progress_position
+        self.progress_description = progress_description
+        self.progress_stream = progress_stream
         self.config = utils.load_config(config_path)
         utils.set_seed(self.config["seed"])
 
@@ -162,7 +165,10 @@ class Experiment():
             checkpoint_manager=self.checkpoint_manager,
             logger=self.logger,
             regularizer=regularizer,
-            regularizer_eta=regularizer_eta
+            regularizer_eta=regularizer_eta,
+            progress_position=self.progress_position,
+            progress_description=self.progress_description,
+            progress_stream=self.progress_stream,
         )
 
         trainer.fit()

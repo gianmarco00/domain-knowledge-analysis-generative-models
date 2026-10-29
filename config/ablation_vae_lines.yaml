@@ -1,0 +1,41 @@
+base_config: config/lora_vae_lines.yaml
+
+ablation:
+  output_dir: ablations/vae_lines_rotated_lines_output_gram
+  parallel_models: 2
+  source_label: Horizontal lines
+  target_label: Rotated horizontal lines
+
+  regularizer_mode: output_gram
+  seeds: [42]
+  eta_values: [100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0]
+  m_values: [5, 10, 16]
+  s_values: [0.01, 0.5]
+  extra_runs:
+    - {seed: 42, eta: 1.0, mode: source_loss}
+  target_gain_fraction: 0.99
+
+  visual_seed: 123
+  fid_seed: 123
+  num_qualitative_images: 6
+  num_response_images: 2
+  response_transformations: [horizontal_translation, vertical_translation, isotropic_scale, aspect_ratio_deformation]
+
+  # Contrast, gamma correction, binarization, and sharpening do not change binary lines.
+  semantic_transformations:
+    - {name: horizontal_translation, intensity: 2}
+    - {name: vertical_translation, intensity: 2}
+    - {name: isotropic_scale, intensity: 1.10}
+    - {name: aspect_ratio_deformation, intensity: 1.10}
+    - {name: diagonal_shear, intensity: 0.12}
+    - {name: vertical_shear, intensity: 0.12}
+    - {name: stroke_thickness, intensity: 0.5}
+    - {name: gaussian_blur, intensity: 0.7}
+    - {name: rotation, intensity: 15.0}
+    - {name: horizontal_wave, intensity: 2.0}
+    - {name: vertical_wave, intensity: 2.0}
+    - {name: perspective, intensity: 0.2}
+    - {name: vertical_perspective, intensity: 0.2}
+    - {name: swirl, intensity: 0.5}
+    - {name: radial_bulge, intensity: 0.5}
+    - {name: vignette, intensity: 0.5}

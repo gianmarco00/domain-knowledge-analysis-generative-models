@@ -71,3 +71,21 @@ def test_selected_model_label_does_not_expose_transformation_type():
 
     assert label == "η=1000, M=10, s=0.1"
     assert "semantic" not in label
+
+
+def test_qualitative_plots_use_configured_dataset_labels(tmp_path, monkeypatch):
+    plotter = AblationPlotter(tmp_path, {"source_label": "Horizontal lines", "target_label": "Rotated horizontal lines"})
+    titles = []
+    monkeypatch.setattr(plotter, "plot_reconstructions", lambda results, title, filename, label: titles.append(title))
+    monkeypatch.setattr(plotter, "plot_generations", lambda results, label: None)
+    monkeypatch.setattr(plotter, "plot_model_responses", lambda results: None)
+
+    plotter.plot_qualitative({
+        "source": {},
+        "target": {},
+        "generation": {},
+        "responses": {},
+        "selected_model": {"eta": 10, "m": 5, "s": 0.1},
+    })
+
+    assert titles == ["Horizontal lines reconstructions", "Rotated horizontal lines reconstructions"]

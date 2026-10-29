@@ -5,7 +5,7 @@ from collections import defaultdict
 from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, regularizer=None, regularizer_eta=1.0, checkpoint_manager=None, logger=None):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, regularizer=None, regularizer_eta=1.0, checkpoint_manager=None, logger=None, progress_position=None, progress_description="Training", progress_stream=None):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
@@ -17,6 +17,9 @@ class Trainer:
         self.device = device
         self.logger = logger
         self.checkpoint_manager = checkpoint_manager
+        self.progress_position = progress_position
+        self.progress_description = progress_description
+        self.progress_stream = progress_stream
         self.regularizer = regularizer
         self.regularizer_eta = torch.as_tensor(regularizer_eta, device=self.device)
 
@@ -117,7 +120,19 @@ class Trainer:
     
     def fit(self):
 
-        progress_bar = tqdm(range(self.epochs), desc="Training")
+        if self.progress_position is None:
+            progress_bar = tqdm(range(self.epochs), desc="Training")
+        else:
+            progress_bar = tqdm(
+                range(self.epochs),
+                desc=self.progress_description,
+                position=self.progress_position,
+                file=self.progress_stream,
+                leave=False,
+                dynamic_ncols=True,
+                bar_format="{desc}: {percentage:3.0f}%|{bar:10}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]{postfix}",
+                disable=not self.progress_stream.isatty(),
+            )
 
         for epoch in progress_bar:
 
@@ -132,10 +147,17 @@ class Trainer:
             self.history["validation_loss"].append(validation_loss)
             self.history["learning_rate"].append(current_lr)
 
-            progress_bar.set_postfix({
+            if self.progress_position is None:
+                progress_bar.set_postfix({
                     "train_loss": train_loss,
                     "validation_loss": validation_loss,
-                    "learning_rate": current_lr
+                    "learning_rate": current_lr,
+                })
+            else:
+                progress_bar.set_postfix({
+                    "tr": f"{train_loss:.3g}",
+                    "val": f"{validation_loss:.3g}",
+                    "lr": f"{current_lr:.3g}",
                 })
             
             if self.checkpoint_manager is not None:

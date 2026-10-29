@@ -1,10 +1,13 @@
 from copy import deepcopy
-from concurrent.futures import ProcessPoolExecutor
+from contextlib import redirect_stderr, redirect_stdout
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import get_context
 from pathlib import Path
 
 import csv
+import sys
 import torch
+from tqdm import tqdm
 
 from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.experiments.experiment import Experiment
@@ -13,17 +16,43 @@ from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
 from domain_knowledge_analysis.scoring import AdaptationScorer
 
 
-def train_ablation_model(config_path):
+# Each spawned worker owns one fixed terminal row for its training bar.
+WORKER_PROGRESS_POSITION = None
+
+
+def initialize_ablation_worker(positions, progress_lock):
+    global WORKER_PROGRESS_POSITION
+    WORKER_PROGRESS_POSITION = positions.get()
+    tqdm.set_lock(progress_lock)
+
+
+def train_ablation_model(config_path, progress_position=None):
     config_path = Path(config_path)
     checkpoint_path = config_path.parent / "checkpoints" / "best.pt"
 
     if checkpoint_path.exists():
         return str(checkpoint_path)
 
-    print(f"Training: {config_path.parent.name}")
-    experiment = Experiment(config_path)
-    experiment.adapt()
-    experiment.logger.close()
+    position = WORKER_PROGRESS_POSITION if progress_position is None else progress_position
+    if position is None:
+        print(f"Training: {config_path.parent.name}")
+        experiment = Experiment(config_path)
+        experiment.adapt()
+        experiment.logger.close()
+    else:
+        # Keep worker messages and warnings out of the shared progress display.
+        progress_stream = sys.stderr
+        log_path = config_path.parent / "training.log"
+        with open(log_path, "a", buffering=1) as log, redirect_stdout(log), redirect_stderr(log):
+            print(f"Training: {config_path.parent.name}")
+            experiment = Experiment(
+                config_path,
+                progress_position=position,
+                progress_description=f"Model {config_path.parent.name[-10:]}",
+                progress_stream=progress_stream,
+            )
+            experiment.adapt()
+            experiment.logger.close()
 
     return str(checkpoint_path)
 
@@ -152,14 +181,39 @@ class Ablation:
         config_paths = [str(run["config_path"]) for run in runs_to_train]
         parallel_models = min(int(self.ablation_config.get("parallel_models", 1)), len(config_paths))
         print(f"Training {len(config_paths)} models with {parallel_models} parallel process(es).")
+        print("Detailed output for each model is saved in its training.log.")
 
+        already_trained = len(self.runs) - len(runs_to_train)
         if parallel_models == 1:
-            for config_path in config_paths:
-                train_ablation_model(config_path)
+            with tqdm(total=len(self.runs), initial=already_trained, desc="Models trained", position=0, dynamic_ncols=True) as progress:
+                for config_path in config_paths:
+                    train_ablation_model(config_path, progress_position=1)
+                    progress.update(1)
             return
 
-        with ProcessPoolExecutor(max_workers=parallel_models, mp_context=get_context("spawn")) as executor:
-            list(executor.map(train_ablation_model, config_paths))
+        context = get_context("spawn")
+        positions = context.Queue()
+        for position in range(1, parallel_models + 1):
+            positions.put(position)
+
+        previous_lock = tqdm.get_lock()
+        progress_lock = context.RLock()
+        tqdm.set_lock(progress_lock)
+        try:
+            with tqdm(total=len(self.runs), initial=already_trained, desc="Models trained", position=0, dynamic_ncols=True) as progress:
+                with ProcessPoolExecutor(
+                    max_workers=parallel_models,
+                    mp_context=context,
+                    initializer=initialize_ablation_worker,
+                    initargs=(positions, progress_lock),
+                ) as executor:
+                    futures = [executor.submit(train_ablation_model, config_path) for config_path in config_paths]
+                    for future in as_completed(futures):
+                        future.result()
+                        progress.update(1)
+        finally:
+            tqdm.set_lock(previous_lock)
+            positions.close()
 
     def prepare_dataset_caches(self, runs):
         prepared_seeds = set()

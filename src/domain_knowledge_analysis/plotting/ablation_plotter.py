@@ -106,7 +106,8 @@ class AblationPlotter:
         axis.legend(handles=handles + baseline_handles, loc="best")
         axis.set_xlabel("η")
         axis.set_ylabel("Target FID ↓")
-        axis.set_title("Generated images versus held-out rotated MNIST")
+        target_label = self.config.get("target_label", "Rotated MNIST")
+        axis.set_title(f"Generated images versus held-out {target_label}")
         axis.grid(color="0.9", linestyle="--", linewidth=0.7)
         figure.tight_layout()
         figure.savefig(self.output_dir / "figure_9_target_fid.png", dpi=200)
@@ -114,8 +115,10 @@ class AblationPlotter:
 
     def plot_qualitative(self, results):
         selected_label = self.selected_model_label(results["selected_model"])
-        self.plot_reconstructions(results["source"], "Clean MNIST reconstructions", "figure_5_source_reconstructions.png", selected_label)
-        self.plot_reconstructions(results["target"], "Rotated MNIST reconstructions", "figure_6_target_reconstructions.png", selected_label)
+        source_label = self.config.get("source_label", "Clean MNIST")
+        target_label = self.config.get("target_label", "Rotated MNIST")
+        self.plot_reconstructions(results["source"], f"{source_label} reconstructions", "figure_5_source_reconstructions.png", selected_label)
+        self.plot_reconstructions(results["target"], f"{target_label} reconstructions", "figure_6_target_reconstructions.png", selected_label)
         self.plot_generations(results["generation"], selected_label)
         self.plot_model_responses(results["responses"])
 
@@ -179,7 +182,8 @@ class AblationPlotter:
 
         colorbar = figure.colorbar(response_image, ax=axes[:, 2:].ravel().tolist(), fraction=0.02, pad=0.02)
         colorbar.set_label("h(T(x)) − h(x)")
-        figure.suptitle("Model responses on clean MNIST", y=0.99)
+        source_label = self.config.get("source_label", "Clean MNIST")
+        figure.suptitle(f"Model responses on {source_label}", y=0.99)
         figure.text(0.5, 0.955, f"Selected regularized LoRA: {selected_label}", ha="center", fontsize=10)
         figure.text(0.5, 0.93, "Red increases output intensity; blue decreases it", ha="center", fontsize=9)
         figure.subplots_adjust(left=0.15, right=0.9, top=0.84, bottom=0.03, wspace=0.16, hspace=0.18)

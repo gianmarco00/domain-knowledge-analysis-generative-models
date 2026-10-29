@@ -40,6 +40,7 @@ MEDMNIST_DATASETS = {
 
 TRANSFORMATION_IMPLEMENTATION_VERSION = 5
 TRANSFORMED_DATASET_CACHE_VERSION = 5
+LINES_DATASET_VERSION = 2
 
 
 def affine_sample(image, theta):
@@ -511,10 +512,6 @@ def create_dataset(config, dataset_name, train):
         dataset_name,
     )
 
-    transform = create_transform(
-        dataset_name=dataset_name
-    )
-
     dataset_dir = config["paths"]["dataset_dir"]
     repo_root = get_repo_root()
     dataset_dir = Path(repo_root / dataset_dir)
@@ -528,7 +525,7 @@ def create_dataset(config, dataset_name, train):
             dataset_class=TORCHVISION_DATASETS[dataset_name],
             dataset_dir=dataset_dir,
             train=train,
-            transform=transform,
+            transform=create_transform(dataset_name),
         )
 
     elif dataset_name in MEDMNIST_DATASETS:
@@ -536,7 +533,14 @@ def create_dataset(config, dataset_name, train):
             dataset_name=dataset_name,
             dataset_dir=dataset_dir,
             train=train,
-            transform=transform,
+            transform=create_transform(dataset_name),
+        )
+
+    elif dataset_name in {"lines_dataset", "vertical_lines_dataset"}:
+        dataset = create_lines_dataset(
+            vertical=dataset_name == "vertical_lines_dataset",
+            train=train,
+            seed=config["seed"],
         )
 
     else:
@@ -680,12 +684,16 @@ def create_transformed_datasets(
     train_split = float(config["dataset"]["train_split"])
     seed = int(config["seed"])
 
+    cache_version = f"version_{TRANSFORMED_DATASET_CACHE_VERSION}"
+    if dataset_name in {"lines_dataset", "vertical_lines_dataset"}:
+        cache_version += f"_lines_{LINES_DATASET_VERSION}"
+
     cache_dir = (
         dataset_dir
         / "transformed"
         / dataset_name
         / f"{transformation_type}_intensity_{intensity:g}"
-        / f"version_{TRANSFORMED_DATASET_CACHE_VERSION}"
+        / cache_version
         / f"seed_{seed}_split_{train_split:g}"
     )
 
@@ -883,6 +891,52 @@ def create_transform(dataset_name):
         )
 
     return transforms.ToTensor()
+
+def create_lines_dataset(vertical, train, seed):
+    """Create binary lines with uniformly sampled angles between -7 and 7 degrees."""
+    num_images = 5000 if train else 1000
+    generator = torch.Generator().manual_seed(seed + (0 if train else 1_000_000))
+
+    lengths = torch.randint(16, 25, (num_images,), generator=generator)
+    starts = 2 + (torch.rand(num_images, generator=generator) * (25 - lengths)).long()
+    centers = torch.randint(5, 23, (num_images,), generator=generator)
+    offsets = torch.rand(num_images, generator=generator) - 0.5
+    angles = (torch.rand(num_images, generator=generator) - 0.5) * 14
+    thicknesses = torch.randint(4, 6, (num_images,), generator=generator) if vertical else torch.randint(1, 3, (num_images,), generator=generator)
+
+    columns = torch.arange(28).expand(num_images, -1)
+    line_pixels = (columns >= starts[:, None]) & (columns < (starts + lengths)[:, None])
+    midpoints = starts + (lengths - 1) / 2
+    rows = centers[:, None] + offsets[:, None] + torch.tan(torch.deg2rad(angles[:, None])) * (columns - midpoints[:, None])
+    rows = rows.round().long()
+
+    # Avoid a single protruding pixel where a rounded step falls at an endpoint.
+    image_indices = torch.arange(num_images)
+    ends = starts + lengths - 1
+    rows[image_indices, starts] = rows[image_indices, starts + 1]
+    rows[image_indices, ends] = rows[image_indices, ends - 1]
+
+    images = torch.zeros(num_images, 1, 28, 28)
+    image_indices = image_indices[:, None].expand_as(columns)
+    previous_rows = torch.roll(rows, shifts=1, dims=1)
+    steps = line_pixels & (columns > starts[:, None]) & (rows != previous_rows)
+
+    for pixel in range(5):
+        stroke_pixels = line_pixels & (pixel < thicknesses[:, None])
+        stroke_rows = rows + pixel - (thicknesses[:, None] - 1) // 2
+        images[image_indices[stroke_pixels], 0, stroke_rows[stroke_pixels], columns[stroke_pixels]] = 1
+
+        # Connect diagonal steps so that pixels do not appear detached.
+        bridge_pixels = steps & (pixel < thicknesses[:, None])
+        bridge_rows = previous_rows + pixel - (thicknesses[:, None] - 1) // 2
+        images[image_indices[bridge_pixels], 0, bridge_rows[bridge_pixels], columns[bridge_pixels]] = 1
+
+    if vertical:
+        images = images.transpose(-1, -2).contiguous()
+
+    labels = torch.full((num_images,), int(vertical), dtype=torch.long)
+    return TensorDataset(images, labels)
+
 
 def create_torchvision_dataset(
     dataset_class,

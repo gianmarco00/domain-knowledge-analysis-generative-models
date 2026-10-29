@@ -42,6 +42,8 @@ def create_training_config(base_config, seed, eta, transformation_families, tran
         return config
 
     regularizer_config = deepcopy(base_config["lora"]["regularizer"])
+    if regularizer_config is None:
+        raise ValueError("The ablation base config must define lora.regularizer for regularized runs; it is currently null.")
     regularizer_config["eta"] = float(eta)
 
     if regularizer_mode == "source_loss":

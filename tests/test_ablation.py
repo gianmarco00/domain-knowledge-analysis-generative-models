@@ -1,4 +1,4 @@
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import get_context
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -119,12 +119,14 @@ def test_train_ablation_model_runs_in_spawned_processes(tmp_path):
     assert checkpoint_paths == [str(path.parent / "checkpoints" / "best.pt") for path in config_paths]
 
 
-def test_train_models_uses_two_processes_and_skips_existing_models(tmp_path, monkeypatch):
+def test_train_models_uses_two_processes_and_skips_existing_models(tmp_path, monkeypatch, capsys):
     class FakeExecutor:
         instance = None
 
-        def __init__(self, max_workers, mp_context):
+        def __init__(self, max_workers, mp_context, initializer, initargs):
             self.max_workers = max_workers
+            self.initializer = initializer
+            self.initargs = initargs
             self.config_paths = []
             self.__class__.instance = self
 
@@ -134,9 +136,11 @@ def test_train_models_uses_two_processes_and_skips_existing_models(tmp_path, mon
         def __exit__(self, *args):
             pass
 
-        def map(self, function, config_paths):
-            self.config_paths = list(config_paths)
-            return [None] * len(self.config_paths)
+        def submit(self, function, config_path):
+            self.config_paths.append(config_path)
+            future = Future()
+            future.set_result(None)
+            return future
 
     monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.ProcessPoolExecutor", FakeExecutor)
     ablation = Ablation.__new__(Ablation)
@@ -153,6 +157,9 @@ def test_train_models_uses_two_processes_and_skips_existing_models(tmp_path, mon
     assert FakeExecutor.instance.max_workers == 2
     assert FakeExecutor.instance.config_paths == [str(run["config_path"]) for run in ablation.runs[:2]]
     assert prepared_runs == ablation.runs[:2]
+    progress_output = capsys.readouterr().err
+    assert "1/3" in progress_output
+    assert "3/3" in progress_output
 
 
 def test_prepare_dataset_caches_runs_once_per_seed(tmp_path, monkeypatch):
@@ -349,3 +356,33 @@ def test_model_responses_are_output_differences_for_both_models(monkeypatch):
     torch.testing.assert_close(results["regularized"][0], torch.full((2, 1, 2, 2), 0.3))
     torch.testing.assert_close(results["regularized"][1], torch.full((2, 1, 2, 2), -0.6))
     assert received_anchor_points[0] is anchor_points
+
+
+def test_training_progress_writes_worker_messages_to_run_log(tmp_path, monkeypatch):
+    class ProgressExperiment(FakeExperiment):
+        def __init__(self, config_path, progress_position, progress_description, progress_stream):
+            super().__init__(config_path)
+            self.progress_position = progress_position
+            self.progress_description = progress_description
+            self.progress_stream = progress_stream
+            print("Preparing model")
+
+        def adapt(self):
+            print("Training model")
+            super().adapt()
+
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.Experiment", ProgressExperiment)
+    ProgressExperiment.instances.clear()
+    config_path = tmp_path / "model_1234567890" / "config.yaml"
+    config_path.parent.mkdir()
+
+    train_ablation_model(config_path, progress_position=2)
+
+    experiment = ProgressExperiment.instances[0]
+    assert experiment.progress_position == 2
+    assert experiment.progress_description == "Model 1234567890"
+    assert experiment.progress_stream is not None
+    assert experiment.adapt_calls == 1
+    assert experiment.logger.closed
+    assert "Preparing model" in (config_path.parent / "training.log").read_text()
+    assert "Training model" in (config_path.parent / "training.log").read_text()

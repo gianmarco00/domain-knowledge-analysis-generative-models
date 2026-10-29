@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain_knowledge_analysis.experiments.ablation_utils import generate_model_runs, select_best_models, select_named_transformations, select_transformation_prefix, training_config_id
+from domain_knowledge_analysis.experiments.ablation_utils import create_training_config, generate_model_runs, select_best_models, select_named_transformations, select_transformation_prefix, training_config_id
 
 
 def load_configs():
@@ -141,3 +141,10 @@ def test_best_model_selection_records_when_no_model_reaches_the_target_rule():
     assert selected["best_target_gain"] == results[1]
     assert selection_summary["num_eligible_models"] == 0
     assert selection_summary["best_regularized_target_fraction"] == pytest.approx(0.9)
+
+
+def test_regularized_ablation_explains_missing_base_regularizer():
+    base, config = load_configs()
+    base["lora"]["regularizer"] = None
+    with pytest.raises(ValueError, match="base config must define lora.regularizer"):
+        create_training_config(base, 42, 10, config["semantic_transformations"][:5], 0.1)
