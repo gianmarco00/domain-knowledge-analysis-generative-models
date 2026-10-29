@@ -130,7 +130,7 @@ class Trainer:
                 file=self.progress_stream,
                 leave=False,
                 dynamic_ncols=True,
-                bar_format="{desc}: {percentage:3.0f}%|{bar:10}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]{postfix}",
+                bar_format="{desc}: {n_fmt}/{total_fmt} |{bar:8}| [{elapsed}]{postfix}",
                 disable=not self.progress_stream.isatty(),
             )
 

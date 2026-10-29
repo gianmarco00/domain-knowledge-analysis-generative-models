@@ -10,8 +10,12 @@ def main():
     parser.add_argument("config", nargs="?", type=Path, default=default_config, help="Path to the ablation YAML file.")
     args = parser.parse_args()
 
-    ablation = Ablation(args.config)
-    ablation.run()
+    try:
+        ablation = Ablation(args.config)
+        ablation.run()
+    except KeyboardInterrupt:
+        print("\nAblation stopped. Completed model checkpoints are preserved.")
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":

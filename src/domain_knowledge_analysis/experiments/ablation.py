@@ -1,10 +1,10 @@
 from copy import deepcopy
 from contextlib import redirect_stderr, redirect_stdout
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import get_context
 from pathlib import Path
 
 import csv
+import signal
 import sys
 import torch
 from tqdm import tqdm
@@ -22,15 +22,22 @@ WORKER_PROGRESS_POSITION = None
 
 def initialize_ablation_worker(positions, progress_lock):
     global WORKER_PROGRESS_POSITION
+    # The parent handles Ctrl+C and shuts down all workers together.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     WORKER_PROGRESS_POSITION = positions.get()
     tqdm.set_lock(progress_lock)
+
+
+def model_training_completed(model_dir):
+    checkpoint_dir = Path(model_dir) / "checkpoints"
+    return (checkpoint_dir / "best.pt").exists() and (checkpoint_dir / "last.pt").exists()
 
 
 def train_ablation_model(config_path, progress_position=None):
     config_path = Path(config_path)
     checkpoint_path = config_path.parent / "checkpoints" / "best.pt"
 
-    if checkpoint_path.exists():
+    if model_training_completed(config_path.parent):
         return str(checkpoint_path)
 
     position = WORKER_PROGRESS_POSITION if progress_position is None else progress_position
@@ -171,7 +178,7 @@ class Ablation:
         return {row["model_id"]: row for row in rows}
 
     def train_models(self):
-        runs_to_train = [run for run in self.runs if not (run["model_dir"] / "checkpoints" / "best.pt").exists()]
+        runs_to_train = [run for run in self.runs if not model_training_completed(run["model_dir"])]
 
         if not runs_to_train:
             print("All models are already trained.")
@@ -201,16 +208,27 @@ class Ablation:
         tqdm.set_lock(progress_lock)
         try:
             with tqdm(total=len(self.runs), initial=already_trained, desc="Models trained", position=0, dynamic_ncols=True) as progress:
-                with ProcessPoolExecutor(
-                    max_workers=parallel_models,
-                    mp_context=context,
+                pool = context.Pool(
+                    processes=parallel_models,
                     initializer=initialize_ablation_worker,
                     initargs=(positions, progress_lock),
-                ) as executor:
-                    futures = [executor.submit(train_ablation_model, config_path) for config_path in config_paths]
-                    for future in as_completed(futures):
-                        future.result()
+                )
+                try:
+                    for _ in pool.imap_unordered(train_ablation_model, config_paths):
                         progress.update(1)
+                    pool.close()
+                    pool.join()
+                except BaseException:
+                    # Ignore repeated Ctrl+C while terminating and reaping workers.
+                    previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+                    try:
+                        # No worker can be killed while holding tqdm's shared lock.
+                        with progress_lock:
+                            pool.terminate()
+                        pool.join()
+                    finally:
+                        signal.signal(signal.SIGINT, previous_handler)
+                    raise
         finally:
             tqdm.set_lock(previous_lock)
             positions.close()
@@ -230,7 +248,7 @@ class Ablation:
         experiment = Experiment(run["config_path"])
         checkpoint_path = run["model_dir"] / "checkpoints" / "best.pt"
 
-        if checkpoint_path.exists():
+        if model_training_completed(run["model_dir"]):
             print("Loading existing model.")
         else:
             print("Training model.")

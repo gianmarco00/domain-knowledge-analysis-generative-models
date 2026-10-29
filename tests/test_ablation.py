@@ -1,4 +1,4 @@
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -82,6 +82,7 @@ def test_load_or_train_reuses_existing_checkpoint(tmp_path, monkeypatch):
     checkpoint_path = run["model_dir"] / "checkpoints" / "best.pt"
     checkpoint_path.parent.mkdir(parents=True)
     checkpoint_path.touch()
+    (checkpoint_path.parent / "last.pt").touch()
 
     experiment = ablation.load_or_train(run)
 
@@ -111,6 +112,7 @@ def test_train_ablation_model_runs_in_spawned_processes(tmp_path):
         checkpoint_path = config_path.parent / "checkpoints" / "best.pt"
         checkpoint_path.parent.mkdir(parents=True)
         checkpoint_path.touch()
+        (checkpoint_path.parent / "last.pt").touch()
         config_paths.append(config_path)
 
     with ProcessPoolExecutor(max_workers=2, mp_context=get_context("spawn")) as executor:
@@ -120,42 +122,46 @@ def test_train_ablation_model_runs_in_spawned_processes(tmp_path):
 
 
 def test_train_models_uses_two_processes_and_skips_existing_models(tmp_path, monkeypatch, capsys):
-    class FakeExecutor:
+    class FakePool:
         instance = None
 
-        def __init__(self, max_workers, mp_context, initializer, initargs):
-            self.max_workers = max_workers
+        def __init__(self, processes, initializer, initargs):
+            self.processes = processes
             self.initializer = initializer
             self.initargs = initargs
             self.config_paths = []
+            self.closed = False
+            self.joined = False
             self.__class__.instance = self
 
-        def __enter__(self):
-            return self
+        def imap_unordered(self, function, config_paths):
+            self.config_paths = list(config_paths)
+            return iter([None] * len(self.config_paths))
 
-        def __exit__(self, *args):
-            pass
+        def close(self):
+            self.closed = True
 
-        def submit(self, function, config_path):
-            self.config_paths.append(config_path)
-            future = Future()
-            future.set_result(None)
-            return future
+        def join(self):
+            self.joined = True
 
-    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.ProcessPoolExecutor", FakeExecutor)
+    context = get_context("spawn")
+    fake_context = SimpleNamespace(Queue=context.Queue, RLock=context.RLock, Pool=FakePool)
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.get_context", lambda _: fake_context)
     ablation = Ablation.__new__(Ablation)
     ablation.ablation_config = {"parallel_models": 2}
     ablation.runs = [make_run(tmp_path / "first"), make_run(tmp_path / "second"), make_run(tmp_path / "trained")]
     existing_checkpoint = ablation.runs[-1]["model_dir"] / "checkpoints" / "best.pt"
     existing_checkpoint.parent.mkdir(parents=True)
     existing_checkpoint.touch()
+    (existing_checkpoint.parent / "last.pt").touch()
     prepared_runs = []
     ablation.prepare_dataset_caches = lambda runs: prepared_runs.extend(runs)
 
     ablation.train_models()
 
-    assert FakeExecutor.instance.max_workers == 2
-    assert FakeExecutor.instance.config_paths == [str(run["config_path"]) for run in ablation.runs[:2]]
+    assert FakePool.instance.processes == 2
+    assert FakePool.instance.config_paths == [str(run["config_path"]) for run in ablation.runs[:2]]
+    assert FakePool.instance.closed and FakePool.instance.joined
     assert prepared_runs == ablation.runs[:2]
     progress_output = capsys.readouterr().err
     assert "1/3" in progress_output
@@ -386,3 +392,49 @@ def test_training_progress_writes_worker_messages_to_run_log(tmp_path, monkeypat
     assert experiment.logger.closed
     assert "Preparing model" in (config_path.parent / "training.log").read_text()
     assert "Training model" in (config_path.parent / "training.log").read_text()
+
+
+def test_partial_checkpoint_does_not_skip_training(tmp_path, monkeypatch):
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.Experiment", FakeExperiment)
+    FakeExperiment.instances.clear()
+    config_path = tmp_path / "model" / "config.yaml"
+    checkpoint_dir = config_path.parent / "checkpoints"
+    checkpoint_dir.mkdir(parents=True)
+    (checkpoint_dir / "best.pt").touch()
+
+    train_ablation_model(config_path)
+
+    assert FakeExperiment.instances[0].adapt_calls == 1
+
+
+def test_ctrl_c_terminates_and_joins_the_worker_pool(tmp_path, monkeypatch):
+    class InterruptedPool:
+        instance = None
+
+        def __init__(self, processes, initializer, initargs):
+            self.terminated = False
+            self.joined = False
+            self.__class__.instance = self
+
+        def imap_unordered(self, function, config_paths):
+            raise KeyboardInterrupt
+
+        def terminate(self):
+            self.terminated = True
+
+        def join(self):
+            self.joined = True
+
+    context = get_context("spawn")
+    fake_context = SimpleNamespace(Queue=context.Queue, RLock=context.RLock, Pool=InterruptedPool)
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.get_context", lambda _: fake_context)
+    ablation = Ablation.__new__(Ablation)
+    ablation.ablation_config = {"parallel_models": 2}
+    ablation.runs = [make_run(tmp_path / "first"), make_run(tmp_path / "second")]
+    ablation.prepare_dataset_caches = lambda runs: None
+
+    with pytest.raises(KeyboardInterrupt):
+        ablation.train_models()
+
+    assert InterruptedPool.instance.terminated
+    assert InterruptedPool.instance.joined
