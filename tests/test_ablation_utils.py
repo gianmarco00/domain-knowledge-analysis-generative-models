@@ -206,3 +206,53 @@ def test_manual_best_model_overrides_fid_and_gain_rules_and_rejects_ambiguity():
 def test_fid_tolerance_must_be_finite_and_nonnegative(fraction):
     with pytest.raises(ValueError, match="max_fid_increase_fraction"):
         select_best_models([], max_fid_increase_fraction=fraction)
+
+
+def test_best_overall_selects_m20_when_eligible_with_less_validation_degradation():
+    baseline = {"model_id": "lora", "seed": 42, "eta": 0, "test_target_fid": 20,
+                "validation_target_gain": 0.1, "validation_source_degradation": 0.05}
+    m10 = {"model_id": "m10", "seed": 42, "eta": 100000, "m": 10, "s": 0.5,
+           "test_target_fid": 21, "validation_target_gain": 0.0995, "validation_source_degradation": 0.03}
+    m20 = {"model_id": "m20", "seed": 42, "eta": 100000, "m": 20, "s": 0.5,
+           "test_target_fid": 19, "validation_target_gain": 0.0996, "validation_source_degradation": 0.028}
+
+    for results in ([baseline, m10, m20], [baseline, m20, m10]):
+        best, summary = select_best_models(results)
+        assert best["best_overall"]["model_id"] == "m20"
+        assert summary["num_eligible_models"] == 2
+
+
+def test_best_overall_uses_validation_even_when_test_graph_favors_m20():
+    baseline = {"model_id": "lora", "seed": 42, "eta": 0, "test_target_fid": 20,
+                "validation_target_gain": 0.1, "validation_source_degradation": 0.05}
+    m10 = {"model_id": "m10", "seed": 42, "eta": 100000, "m": 10, "s": 0.5,
+           "test_target_fid": 21, "validation_target_gain": 0.0995, "validation_source_degradation": 0.03,
+           "test_target_gain": 0.099, "test_source_degradation": 0.029}
+    m20 = {"model_id": "m20", "seed": 42, "eta": 100000, "m": 20, "s": 0.5,
+           "test_target_fid": 19, "validation_target_gain": 0.0989, "validation_source_degradation": 0.028,
+           "test_target_gain": 0.100, "test_source_degradation": 0.028}
+
+    best, summary = select_best_models([baseline, m10, m20])
+    assert best["best_overall"]["model_id"] == "m10"
+    assert summary["num_eligible_models"] == 1
+    assert m20["validation_target_gain"] < summary["required_target_gain"]
+
+
+def test_mnist_selection_matches_reported_m10_m20_metrics():
+    rows = [
+        {"model_id": "08409eae5f", "seed": 42, "eta": 0, "test_target_fid": 20.320091247558594,
+         "validation_target_gain": 0.016977336555719376, "validation_source_degradation": 0.020937145431836446},
+        {"model_id": "1fc9741ddb", "seed": 42, "eta": 10000, "m": 10, "s": 0.5, "test_target_fid": 21.31299591064453,
+         "validation_target_gain": 0.016812034219503405, "validation_source_degradation": 0.01491932608683904},
+        {"model_id": "3c793eb1b5", "seed": 42, "eta": 10000, "m": 20, "s": 0.5, "test_target_fid": 20.52738380432129,
+         "validation_target_gain": 0.01695359694957733, "validation_source_degradation": 0.016346378922462462},
+        {"model_id": "ce081f0cd4", "seed": 42, "eta": 100000, "m": 20, "s": 0.5, "test_target_fid": 21.891908645629883,
+         "validation_target_gain": 0.016698507865269982, "validation_source_degradation": 0.011953310658534368},
+    ]
+
+    best, summary = select_best_models(rows)
+    assert summary["required_target_gain"] == pytest.approx(0.016807563190162182)
+    assert summary["max_fid_by_seed"]["42"] == pytest.approx(22.758502197265628)
+    assert summary["num_fid_eligible_models"] == 3
+    assert summary["num_eligible_models"] == 2
+    assert best["best_overall"]["model_id"] == "1fc9741ddb"

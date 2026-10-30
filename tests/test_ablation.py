@@ -591,3 +591,19 @@ def test_run_respects_fid_limit_and_manual_override(tmp_path, monkeypatch, manua
         assert summary["models"]["best_overall"]["model_id"] == "regularized"
         assert plotter.plot_fid.call_args.args[2] == "manual"
         assert ablation.create_qualitative_results.call_args.args[0]["model_id"] == "regularized"
+
+
+def test_qualitative_results_load_the_exact_selected_model_id():
+    ordinary = {"seed": 42, "eta": 0, "mode": "ordinary_lora", "model_id": "ordinary"}
+    source_loss = {"seed": 42, "eta": 1, "mode": "source_loss", "model_id": "source-loss"}
+    m10 = {"seed": 42, "eta": 100000, "mode": "output_gram", "model_id": "m10", "m": 10}
+    m20 = {"seed": 42, "eta": 100000, "mode": "output_gram", "model_id": "m20", "m": 20}
+    ablation = Ablation.__new__(Ablation)
+    ablation.runs = [ordinary, source_loss, m10, m20]
+    ablation.ablation_config = {"num_qualitative_images": 1}
+    ablation.load_or_train = Mock(side_effect=[object(), object(), RuntimeError("selected model reached")])
+
+    with pytest.raises(RuntimeError, match="selected model reached"):
+        ablation.create_qualitative_results(m20)
+
+    assert [call.args[0]["model_id"] for call in ablation.load_or_train.call_args_list] == ["ordinary", "source-loss", "m20"]
