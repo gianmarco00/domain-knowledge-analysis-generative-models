@@ -26,7 +26,7 @@ training:
 loss:
   name: vae_loss
   log_prob_function: bernoulli
-  beta: 1.0
+  beta: 2.0
 
 model:
   name: vae

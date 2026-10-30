@@ -1,14 +1,14 @@
 base_config: config/lora_vae_lines.yaml
 
 ablation:
-  output_dir: ablations/vae_lines_rotated_lines_output_gram
+  output_dir: ablations/vae_lines_rotated_lines_output_gram_beta_2
   parallel_models: 2
   source_label: Horizontal lines
   target_label: Rotated horizontal lines
 
   regularizer_mode: output_gram
   seeds: [42]
-  eta_values: [100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0]
+  eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0]
   m_values: [5, 10, 16]
   s_values: [0.01, 0.5]
   extra_runs:
