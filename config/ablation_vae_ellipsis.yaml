@@ -1,7 +1,7 @@
 base_config: config/lora_vae_ellipsis.yaml
 
 ablation:
-  output_dir: ablations/vae_ellipsis_rotated_ellipsis_output_gram_beta_2
+  output_dir: ablations/vae_ellipsis_rotated_ellipsis_output_gram
   parallel_models: 2
   source_label: Horizontal ellipses
   target_label: Rotated horizontal ellipses
