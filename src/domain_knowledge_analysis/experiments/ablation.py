@@ -158,10 +158,10 @@ class Ablation:
 
         plotter = AblationPlotter(self.output_dir, self.ablation_config)
         plotter.plot_figure_1(results)
-        plotter.plot_figure_2(results)
-        plotter.plot_figure_3(results)
+        plotter.plot_figure_2(results, selected_model, qualitative_selection)
+        plotter.plot_figure_3(results, selected_model, qualitative_selection)
         plotter.plot_figure_4(results)
-        plotter.plot_fid(results)
+        plotter.plot_fid(results, selected_model, qualitative_selection)
         plotter.plot_qualitative(self.create_qualitative_results(selected_model))
 
         print("\nBest regularized models:")

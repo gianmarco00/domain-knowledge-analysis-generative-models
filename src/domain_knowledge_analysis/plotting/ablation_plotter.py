@@ -1,7 +1,7 @@
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import math
 from matplotlib.lines import Line2D
 
 
@@ -16,115 +16,191 @@ class AblationPlotter:
         self.config = config
 
     @staticmethod
-    def percentage(row, metric):
-        """Return the signed MSE change relative to the original model."""
-        baseline = float(row[f"test_base_{'target' if metric == 'test_target_gain' else 'source'}_mse"])
-        return 100 * float(row[metric]) / baseline if baseline > 0 else math.nan
+    def split_rows(results):
+        ordinary = [row for row in results if float(row["eta"]) == 0]
+        source_loss = [row for row in results if row.get("mode") == "source_loss" and float(row["eta"]) != 0]
+        regularized = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
+        return regularized, ordinary, source_loss
 
     @staticmethod
-    def add_metric_formulas(figure):
-        figure.text(0.5, 0.10, "Target gain (%) = 100 × (original target MSE − adapted target MSE) / original target MSE", ha="center", va="center", fontsize=9)
-        figure.text(0.5, 0.04, "Source degradation (%) = 100 × (adapted source MSE − original source MSE) / original source MSE", ha="center", va="center", fontsize=9)
+    def ordinary_by_seed(ordinary_rows):
+        baselines = {}
+        for row in ordinary_rows:
+            seed = row.get("seed")
+            if seed in baselines:
+                raise ValueError(f"Multiple ordinary LoRA baselines for seed {seed}.")
+            baselines[seed] = row
+        return baselines
+
+    @staticmethod
+    def percentage(row, metric, baselines):
+        """Compare each signed MSE change with ordinary LoRA for the same seed."""
+        seed = row.get("seed")
+        if seed not in baselines:
+            raise ValueError(f"No ordinary LoRA baseline for seed {seed}.")
+        reference = float(baselines[seed][metric])
+        return 100 * float(row[metric]) / reference if reference != 0 else math.nan
+
+    @staticmethod
+    def add_metric_formulas(figure, baselines):
+        lines = [
+            "Target gain (%) = 100 × [MSE_target(S) − MSE_target(P)] / [MSE_target(S) − MSE_target(L)]",
+            "Source degradation (%) = 100 × [MSE_source(P) − MSE_source(S)] / [MSE_source(L) − MSE_source(S)]",
+            "MSE = mean squared reconstruction error, measured on the target or source images.",
+            "S = Source VAE, trained on source images.  L = LoRA VAE, adapted to target images without a regularizer.",
+            "P = plotted model: L, source-loss LoRA, or regularized LoRA (S adapted to target images with a regularizer).",
+        ]
+        if any(float(row[metric]) <= 0 for row in baselines.values() for metric in ("test_target_gain", "test_source_degradation")):
+            lines.append("Zero LoRA change is undefined; a negative LoRA change reverses the percentage direction.")
+        height = figure.get_figheight()
+        for index, line in enumerate(reversed(lines)):
+            figure.text(0.5, (0.18 + index * 0.20) / height, line, ha="center", va="center", fontsize=9)
+
+    @staticmethod
+    def metric_label(metric, baselines):
+        values = [float(row[metric]) for row in baselines.values() if float(row[metric]) != 0]
+        label = "Target gain" if metric == "test_target_gain" else "Source degradation"
+        preferred = "↑" if metric == "test_target_gain" else "↓"
+        opposite = "↓" if preferred == "↑" else "↑"
+        direction = preferred if values and all(value > 0 for value in values) else opposite if values and all(value < 0 for value in values) else ""
+        return f"{label} (%) {direction}".rstrip()
+
+    @staticmethod
+    def set_log_ticks(axis, positive_values):
+        if not positive_values:
+            return
+        linthresh = positive_values[0] / 2
+        axis.set_xscale("symlog", linthresh=linthresh)
+        def label(value):
+            exponent = round(math.log10(value))
+            if value >= 1000 and math.isclose(value, 10 ** exponent, rel_tol=1e-9):
+                return rf"$10^{{{exponent}}}$"
+            return f"{value:g}"
+        axis.set_xticks([0.0, *positive_values], ["0", *[label(value) for value in positive_values]])
+        axis.set_xlim(-linthresh * 0.5, positive_values[-1] * 1.5)
+
+    @staticmethod
+    def legend_handles(color_values, colors):
+        handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[value], markeredgecolor="white", markersize=8, label=f"{value:g}") for value in color_values]
+        handles.append(Line2D([0], [0], marker="D", color="none", markerfacecolor=AblationPlotter.ORDINARY_COLOR, markersize=8, label="Ordinary LoRA"))
+        handles.append(Line2D([0], [0], marker="*", color="none", markerfacecolor=AblationPlotter.SOURCE_LOSS_COLOR, markersize=12, label="Source-loss LoRA"))
+        return handles
 
     def plot_figure_1(self, results):
-        self.plot_metric_pair(results, "eta", "m", "η", "M", "Effect of regularization weight", "figure_1_eta.png")
+        regularized, _, _ = self.split_rows(results)
+        strengths = sorted({float(row["s"]) for row in regularized})
+        self.plot_metric_pair(results, "eta", "m", "η", "M", "Effect of regularization weight", "figure_1_eta.png", facets=strengths)
 
-    def plot_figure_2(self, results):
-        self.plot_metric_pair(results, "m", "eta", "Number of transformations M", "η", "Effect of transformation count", "figure_2_transformation_count.png")
+    def plot_figure_2(self, results, selected_model, selection="best_overall"):
+        strength = float(selected_model["s"])
+        self.plot_metric_pair(results, "m", "eta", "Number of transformations M", "η", f"Effect of transformation count · s={strength:g} ({self.selection_label(selection)})", "figure_2_transformation_count.png", filters={"s": strength})
 
-    def plot_figure_3(self, results):
-        self.plot_metric_pair(results, "s", "m", "Transformation strength s", "M", "Effect of transformation strength", "figure_3_transformation_strength.png")
+    def plot_figure_3(self, results, selected_model, selection="best_overall"):
+        eta = float(selected_model["eta"])
+        self.plot_metric_pair(results, "s", "m", "Transformation strength s", "M", f"Effect of transformation strength · η={eta:g} ({self.selection_label(selection)})", "figure_3_transformation_strength.png", filters={"eta": eta})
 
-    def plot_metric_pair(self, results, x_name, color_name, x_label, color_label, title, filename):
-        regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
-        source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
-        ordinary_rows = [row for row in results if float(row["eta"]) == 0]
-        color_values = sorted({float(row[color_name]) for row in regularized_rows})
-        colors = {value: plt.get_cmap("tab10")(index) for index, value in enumerate(color_values)}
-        metrics = [("test_target_gain", "Target gain (%) ↑"), ("test_source_degradation", "Source degradation (%) ↓")]
-        figure, axes = plt.subplots(1, 2, figsize=(12, 6.2), sharex=True)
+    @staticmethod
+    def selection_label(selection):
+        return "best overall" if selection == "best_overall" else "best target gain fallback"
 
-        for axis, (metric, y_label) in zip(axes, metrics):
-            for color_value in color_values:
-                rows = [row for row in regularized_rows if float(row[color_name]) == color_value]
-                axis.scatter([float(row[x_name]) for row in rows], [self.percentage(row, metric) for row in rows], s=55, color=colors[color_value], edgecolor="white", linewidth=0.6, alpha=0.8)
+    def plot_metric_pair(self, results, x_name, color_name, x_label, color_label, title, filename, facets=None, filters=None):
+        regularized, ordinary, source_loss = self.split_rows(results)
+        for key, value in (filters or {}).items():
+            regularized = [row for row in regularized if float(row[key]) == value]
+        baselines = self.ordinary_by_seed(ordinary)
+        color_values = sorted({float(row[color_name]) for row in regularized})
+        colors = {value: plt.get_cmap("tab10")(index % 10) for index, value in enumerate(color_values)}
+        metrics = [(metric, self.metric_label(metric, baselines)) for metric in ("test_target_gain", "test_source_degradation")]
+        facet_values = facets if facets is not None else [None]
+        if not facet_values:
+            raise ValueError("No regularized models to plot.")
+        height = 2.9 + 3.7 * len(facet_values)
+        figure, axes = plt.subplots(len(facet_values), 2, figsize=(12, height), squeeze=False)
 
-            axis.scatter([0.0] * len(ordinary_rows), [self.percentage(row, metric) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
-            axis.scatter([float(row[x_name]) for row in source_loss_rows], [self.percentage(row, metric) for row in source_loss_rows], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, zorder=4)
-            axis.axhline(0, color="0.75", linewidth=0.8)
-            axis.set_xlabel(x_label)
-            axis.set_ylabel(y_label)
-            axis.grid(color="0.9", linestyle="--", linewidth=0.7)
+        for facet_index, strength in enumerate(facet_values):
+            facet_rows = regularized if strength is None else [row for row in regularized if float(row["s"]) == strength]
+            for axis, (metric, y_label) in zip(axes[facet_index], metrics):
+                for color_value in color_values:
+                    rows = [row for row in facet_rows if float(row[color_name]) == color_value]
+                    # Keep independent seeds and run types separate; repeated x values
+                    # are ambiguous, so leave those groups as points only.
+                    groups = {}
+                    for row in rows:
+                        key = (row.get("seed"), row.get("mode"), row.get("extra_run", False))
+                        groups.setdefault(key, []).append(row)
+                    for group in groups.values():
+                        ordered = sorted(group, key=lambda row: float(row[x_name]))
+                        xs = [float(row[x_name]) for row in ordered]
+                        if len(xs) > 1 and len(set(xs)) == len(xs):
+                            axis.plot(xs, [self.percentage(row, metric, baselines) for row in ordered], color=colors[color_value], linewidth=1.2, alpha=0.8, zorder=1)
+                    axis.scatter([float(row[x_name]) for row in rows], [self.percentage(row, metric, baselines) for row in rows], s=55, color=colors[color_value], edgecolor="white", linewidth=0.6, alpha=0.8, zorder=2)
 
-            if x_name in {"eta", "s"}:
-                positive_values = sorted({float(row[x_name]) for row in regularized_rows + source_loss_rows if float(row[x_name]) > 0})
-                if positive_values:
-                    axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
-                    axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
-            else:
-                axis.set_xticks(sorted({0, *[int(row[x_name]) for row in regularized_rows + source_loss_rows]}))
+                axis.scatter([0.0] * len(ordinary), [self.percentage(row, metric, baselines) for row in ordinary], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
+                axis.scatter([float(row[x_name]) for row in source_loss], [self.percentage(row, metric, baselines) for row in source_loss], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, zorder=4)
+                axis.axhline(0, color="0.75", linewidth=0.8)
+                axis.axhline(100, color="0.7", linewidth=0.8, linestyle=":")
+                axis.set_xlabel(x_label)
+                axis.set_ylabel(y_label)
+                if strength is not None:
+                    axis.set_title(f"s = {strength:g}")
+                axis.grid(color="0.9", linestyle="--", linewidth=0.7)
+                if x_name in {"eta", "s"}:
+                    positive_values = sorted({float(row[x_name]) for row in facet_rows + source_loss if float(row[x_name]) > 0})
+                    self.set_log_ticks(axis, positive_values)
+                else:
+                    axis.set_xticks(sorted({0, *[int(row[x_name]) for row in facet_rows + source_loss]}))
 
-        handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[value], markeredgecolor="white", markersize=8, label=f"{value:g}") for value in color_values]
-        handles.append(Line2D([0], [0], marker="D", color="none", markerfacecolor=self.ORDINARY_COLOR, markersize=8, label="Ordinary LoRA"))
-        handles.append(Line2D([0], [0], marker="*", color="none", markerfacecolor=self.SOURCE_LOSS_COLOR, markersize=12, label="Source-loss LoRA"))
-        figure.legend(handles=handles, title=color_label, loc="upper center", bbox_to_anchor=(0.5, 0.94), ncol=min(len(handles), 6), frameon=False)
+        handles = self.legend_handles(color_values, colors)
+        figure.legend(handles=handles, title=color_label, loc="upper center", bbox_to_anchor=(0.5, 1 - 0.38 / height), ncol=min(len(handles), 6), frameon=False)
         figure.suptitle(title)
-        self.add_metric_formulas(figure)
-        figure.tight_layout(rect=(0, 0.16, 1, 0.83))
+        self.add_metric_formulas(figure, baselines)
+        # Reserve a fixed amount of space for the legend and formula block.
+        figure.tight_layout(rect=(0, 1.35 / height, 1, 1 - 1.12 / height))
         figure.savefig(self.output_dir / filename, dpi=200)
         plt.close(figure)
 
     def plot_figure_4(self, results):
-        regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
-        source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
-        ordinary_rows = [row for row in results if float(row["eta"]) == 0]
-        figure, axis = plt.subplots(figsize=(9, 7.2))
-        axis.scatter([self.percentage(row, "test_source_degradation") for row in regularized_rows], [self.percentage(row, "test_target_gain") for row in regularized_rows], s=58, color=self.REGULARIZED_COLOR, edgecolor="white", linewidth=0.6, alpha=0.8, label="Regularized LoRA")
-        axis.scatter([self.percentage(row, "test_source_degradation") for row in ordinary_rows], [self.percentage(row, "test_target_gain") for row in ordinary_rows], s=82, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA", zorder=3)
-        axis.scatter([self.percentage(row, "test_source_degradation") for row in source_loss_rows], [self.percentage(row, "test_target_gain") for row in source_loss_rows], s=160, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, label="Source-loss LoRA", zorder=4)
-        axis.set_xlabel("Source degradation (%) ↓")
-        axis.set_ylabel("Target gain (%) ↑")
+        regularized, ordinary, source_loss = self.split_rows(results)
+        baselines = self.ordinary_by_seed(ordinary)
+        figure, axis = plt.subplots(figsize=(12, 7.5))
+        for rows, color, marker, size, label in [
+            (regularized, self.REGULARIZED_COLOR, "o", 58, "Regularized LoRA"),
+            (ordinary, self.ORDINARY_COLOR, "D", 82, "Ordinary LoRA"),
+            (source_loss, self.SOURCE_LOSS_COLOR, "*", 160, "Source-loss LoRA"),
+        ]:
+            axis.scatter([self.percentage(row, "test_source_degradation", baselines) for row in rows], [self.percentage(row, "test_target_gain", baselines) for row in rows], s=size, marker=marker, color=color, edgecolor="white", linewidth=0.6, alpha=0.8, label=label)
+        axis.set_xlabel(self.metric_label("test_source_degradation", baselines))
+        axis.set_ylabel(self.metric_label("test_target_gain", baselines))
         axis.set_title("Target learning versus source preservation")
         axis.grid(color="0.9", linestyle="--", linewidth=0.7)
         axis.legend()
-        self.add_metric_formulas(figure)
-        figure.tight_layout(rect=(0, 0.16, 1, 1))
+        self.add_metric_formulas(figure, baselines)
+        figure.tight_layout(rect=(0, 1.35 / figure.get_figheight(), 1, 1))
         figure.savefig(self.output_dir / "figure_4_target_source_tradeoff.png", dpi=200)
         plt.close(figure)
 
-    def plot_fid(self, results):
-        regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
-        source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
-        ordinary_rows = [row for row in results if float(row["eta"]) == 0]
-        m_values = sorted({int(row["m"]) for row in regularized_rows})
-        strengths = sorted({float(row["s"]) for row in regularized_rows})
+    def plot_fid(self, results, selected_model, selection="best_overall"):
+        regularized, ordinary, source_loss = self.split_rows(results)
+        strength = float(selected_model["s"])
+        regularized = [row for row in regularized if float(row["s"]) == strength]
+        m_values = sorted({int(row["m"]) for row in regularized})
         colors = {value: plt.get_cmap("tab10")(index % 10) for index, value in enumerate(m_values)}
-        markers = ["o", "s", "^", "v", "P", "X", "<", ">", "h", "p"]
-        figure, axis = plt.subplots(figsize=(8, 5))
-
+        figure, axis = plt.subplots(figsize=(10, 6))
         for m in m_values:
-            for index, strength in enumerate(strengths):
-                rows = [row for row in regularized_rows if int(row["m"]) == m and float(row["s"]) == strength]
-                axis.scatter([float(row["eta"]) for row in rows], [float(row["test_target_fid"]) for row in rows], s=55, color=colors[m], marker=markers[index % len(markers)], edgecolor="white", linewidth=0.6, alpha=0.8)
-
-        axis.scatter([0.0] * len(ordinary_rows), [float(row["test_target_fid"]) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA")
-        axis.scatter([float(row["eta"]) for row in source_loss_rows], [float(row["test_target_fid"]) for row in source_loss_rows], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, label="Source-loss LoRA")
-        positive_values = sorted({float(row["eta"]) for row in regularized_rows + source_loss_rows if float(row["eta"]) > 0})
-
-        if positive_values:
-            axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
-            axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
-
-        handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[m], markeredgecolor="white", markersize=8, label=f"M={m}") for m in m_values]
-        handles += [Line2D([0], [0], marker=markers[index % len(markers)], color="none", markerfacecolor="0.4", markeredgecolor="white", markersize=8, label=f"s={strength:g}") for index, strength in enumerate(strengths)]
-        baseline_handles, _ = axis.get_legend_handles_labels()
-        axis.legend(handles=handles + baseline_handles, loc="best")
+            rows = [row for row in regularized if int(row["m"]) == m]
+            axis.scatter([float(row["eta"]) for row in rows], [float(row["test_target_fid"]) for row in rows], s=55, color=colors[m], edgecolor="white", linewidth=0.6, alpha=0.8)
+        axis.scatter([0.0] * len(ordinary), [float(row["test_target_fid"]) for row in ordinary], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
+        axis.scatter([float(row["eta"]) for row in source_loss], [float(row["test_target_fid"]) for row in source_loss], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, zorder=4)
+        positive_values = sorted({float(row["eta"]) for row in regularized + source_loss if float(row["eta"]) > 0})
+        self.set_log_ticks(axis, positive_values)
+        handles = self.legend_handles(m_values, colors)
+        figure.legend(handles=handles, title="M", loc="upper center", bbox_to_anchor=(0.5, 0.94), ncol=min(len(handles), 6), frameon=False)
         axis.set_xlabel("η")
         axis.set_ylabel("Target FID ↓")
         target_label = self.config.get("target_label", "Rotated MNIST")
-        axis.set_title(f"Generated images versus held-out {target_label}")
+        figure.suptitle(f"Generated images versus held-out {target_label} · s={strength:g} ({self.selection_label(selection)})")
         axis.grid(color="0.9", linestyle="--", linewidth=0.7)
-        figure.tight_layout()
+        figure.tight_layout(rect=(0, 0, 1, 0.82))
         figure.savefig(self.output_dir / "figure_9_target_fid.png", dpi=200)
         plt.close(figure)
 
