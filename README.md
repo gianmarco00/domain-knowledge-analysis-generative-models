@@ -72,4 +72,4 @@ To run the ellipse ablation after training the source model:
 ./.venv/bin/python scripts/run_ablation.py config/ablation_vae_ellipsis.yaml
 ```
 
-The ablation uses the same grid as the lines study and saves results in `ablations/vae_ellipsis_rotated_ellipsis_output_gram_beta_2`. Choose a new output directory when rerunning with a different source checkpoint at the same path, so that existing models and metrics are not reused.
+The ablation uses the same grid as the lines study, except it includes 20 transformations and tests M = 5, 10, and 20. The four additional intensity transformations act on the ellipses' grayscale pixels. Results are saved in `ablations/vae_ellipsis_rotated_ellipsis_output_gram_beta_2`. Choose a new output directory when rerunning with a different source checkpoint at the same path, so that existing models and metrics are not reused.

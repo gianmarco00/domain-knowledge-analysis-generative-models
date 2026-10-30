@@ -110,5 +110,9 @@ lora:
       - {name: swirl, intensity: 0.5}
       - {name: radial_bulge, intensity: 0.5}
       - {name: vignette, intensity: 0.5}
+      - {name: contrast, intensity: 1.2}
+      - {name: gamma_correction, intensity: 1.2}
+      - {name: binarization, intensity: 0.5}
+      - {name: sharpen, intensity: 0.5}
 
 seed: 42
