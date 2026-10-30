@@ -293,6 +293,8 @@ def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, m
     ablation.fid_reference_key = None
 
     reference_key, fid_key = ablation.prepare_fid(dataloader)
+    legacy_fid_key = ablation.legacy_fid_key
+    assert legacy_fid_key is not None
     assert ablation.score_fid(experiment, dataloader, reference_key) == 12.5
     first_latents = torch.cat(model.latents)
     assert ablation.score_fid(experiment, dataloader, reference_key) == 12.5
@@ -318,6 +320,7 @@ def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, m
     same_reference_key, different_seed_key = ablation.prepare_fid(dataloader)
     assert same_reference_key == changed_reference_key
     assert different_seed_key != changed_fid_key
+    assert ablation.legacy_fid_key != legacy_fid_key
 
 
 def test_saved_results_are_invalidated_when_checkpoint_changes(tmp_path, monkeypatch):
@@ -350,6 +353,38 @@ def test_saved_results_are_invalidated_when_checkpoint_changes(tmp_path, monkeyp
     checkpoint_path.write_bytes(b"different checkpoint")
     with pytest.raises(RuntimeError, match="checkpoint needs evaluation"):
         ablation.run()
+
+
+def test_existing_fid_with_legacy_key_is_reused_without_rewriting_metrics(tmp_path, monkeypatch):
+    metrics_path = tmp_path / "results" / "metrics.csv"
+    metrics_path.parent.mkdir()
+    checkpoint_path = tmp_path / "model" / "checkpoints" / "best.pt"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_bytes(b"checkpoint")
+    row = {"model_id": "abc", "test_target_fid": 12.5,
+           "checkpoint_hash": sha256(checkpoint_path.read_bytes()).hexdigest(), "fid_key": "legacy-key"}
+    with open(metrics_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    original_metrics = metrics_path.read_bytes()
+
+    ablation = Ablation.__new__(Ablation)
+    ablation.output_dir = tmp_path
+    ablation.ablation_config = {"target_gain_fraction": 0.99}
+    ablation.runs = [{"model_id": "abc", "model_dir": checkpoint_path.parent.parent, "config_path": tmp_path / "config.yaml"}]
+    ablation.train_models = Mock()
+    ablation.legacy_fid_key = "legacy-key"
+    ablation.prepare_fid = Mock(return_value=("reference", "new-key"))
+    ablation.load_or_train = Mock(side_effect=AssertionError("FID should be reused"))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.load_config", Mock(return_value={"lora": {"transformed_dataset": {}}}))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_testing_dataloaders", Mock(return_value=object()))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.select_best_models", Mock(side_effect=RuntimeError("saved result reused")))
+
+    with pytest.raises(RuntimeError, match="saved result reused"):
+        ablation.run()
+    ablation.load_or_train.assert_not_called()
+    assert metrics_path.read_bytes() == original_metrics
 
 
 def test_load_saved_results_accepts_missing_fid_for_interrupted_migration(tmp_path):

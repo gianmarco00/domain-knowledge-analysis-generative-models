@@ -7,6 +7,7 @@ from pathlib import Path
 
 import csv
 import json
+import inspect
 import signal
 import sys
 import torch
@@ -21,6 +22,11 @@ from domain_knowledge_analysis.scoring import AdaptationScorer
 
 # Each spawned worker owns one fixed terminal row for its training bar.
 WORKER_PROGRESS_POSITION = None
+
+# Fingerprint of the previous package-wide cache scheme, before plot-only changes.
+# Accept its scores only when all other settings and checkpoint hashes still match.
+LEGACY_FID_CODE_HASH = "2501d3f9a358af583ce4aac51a796b6d72f547e6c5bc5969c4a9ffa9fae96e2e"
+LEGACY_FID_IMPLEMENTATION_HASH = "ab08c8533c6913e21c9076eb2ee4a091d403eb7caea9ce896ac308430c80b20b"
 
 
 def initialize_ablation_worker(positions, progress_lock):
@@ -104,7 +110,10 @@ class Ablation:
             saved_row = saved_results.get(run["model_id"], {})
             checkpoint_matches = saved_row.get("checkpoint_hash") == checkpoint_hash
 
-            if checkpoint_matches and saved_row["test_target_fid"] != "" and saved_row["fid_key"] == fid_key:
+            valid_fid_keys = {fid_key}
+            if getattr(self, "legacy_fid_key", None):
+                valid_fid_keys.add(self.legacy_fid_key)
+            if checkpoint_matches and saved_row.get("test_target_fid", "") != "" and saved_row.get("fid_key") in valid_fid_keys:
                 print("Using saved metrics.")
                 results.append(saved_results[run["model_id"]])
                 continue
@@ -305,9 +314,15 @@ class Ablation:
 
         images = target_dataloader.dataset.tensors[0].contiguous()
         reference_hash = sha256(images.numpy().tobytes())
+        # Plotting and training changes do not affect generated-image FID. Fingerprint
+        # the scoring path, latent sampling, model and adapter implementations instead.
         code_hash = sha256()
-        for path in sorted((Path(__file__).resolve().parents[1]).rglob("*.py")):
-            code_hash.update(path.read_bytes())
+        for function in (self.score_fid, utils.create_random_generator, utils.sample_random_latents):
+            code_hash.update(inspect.getsource(function).encode())
+        package_dir = Path(__file__).resolve().parents[1]
+        for directory in ("models", "adapters"):
+            for path in sorted((package_dir / directory).rglob("*.py")):
+                code_hash.update(path.read_bytes())
         settings = {"shape": list(images.shape), "dtype": str(images.dtype), "weights": self.fid_weights_hash, "torch": torch.__version__, "torchmetrics": version("torchmetrics"), "torch-fidelity": version("torch-fidelity"), "device": str(device), "cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(), "feature": 2048, "antialias": True, "inception_dtype": "float32", "statistics_dtype": "float64", "batch_size": int(self.ablation_config["fid_batch_size"]), "code": code_hash.hexdigest()}
         if device.type == "cuda":
             settings["gpu"] = torch.cuda.get_device_name(device)
@@ -320,6 +335,14 @@ class Ablation:
         reference_key = reference_hash.hexdigest()
         score_settings = {"reference": reference_key, "seed": int(self.ablation_config["fid_seed"])}
         fid_key = sha256(json.dumps(score_settings, sort_keys=True).encode()).hexdigest()
+
+        # Reconstruct the old key so existing scores survive this cache-key change.
+        legacy_settings = {**settings, "code": LEGACY_FID_CODE_HASH}
+        legacy_reference_hash = sha256(images.numpy().tobytes())
+        legacy_reference_hash.update(json.dumps(legacy_settings, sort_keys=True).encode())
+        legacy_score_settings = {"reference": legacy_reference_hash.hexdigest(), "seed": int(self.ablation_config["fid_seed"])}
+        self.legacy_fid_key = (sha256(json.dumps(legacy_score_settings, sort_keys=True).encode()).hexdigest()
+                               if code_hash.hexdigest() == LEGACY_FID_IMPLEMENTATION_HASH else None)
         return reference_key, fid_key
 
     def score_fid(self, experiment, target_dataloader, reference_key):

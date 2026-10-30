@@ -1,3 +1,6 @@
+import math
+
+import pytest
 import torch
 
 from domain_knowledge_analysis.plotting import AblationPlotter
@@ -21,6 +24,9 @@ def make_results():
                     "test_source_degradation": 0.04 - m / 1000,
                     "test_target_fid": 90.0,
                 })
+
+    for row in results:
+        row.update(test_base_target_mse=0.2, test_base_source_mse=0.1)
 
     return results
 
@@ -89,3 +95,13 @@ def test_qualitative_plots_use_configured_dataset_labels(tmp_path, monkeypatch):
     })
 
     assert titles == ["Horizontal lines reconstructions", "Rotated horizontal lines reconstructions"]
+
+
+def test_percentages_use_each_original_model_mse():
+    row = {"test_target_gain": 0.06, "test_source_degradation": -0.01,
+           "test_base_target_mse": 0.2, "test_base_source_mse": 0.05}
+
+    assert AblationPlotter.percentage(row, "test_target_gain") == pytest.approx(30)
+    assert AblationPlotter.percentage(row, "test_source_degradation") == pytest.approx(-20)
+    row["test_base_source_mse"] = 0
+    assert math.isnan(AblationPlotter.percentage(row, "test_source_degradation"))

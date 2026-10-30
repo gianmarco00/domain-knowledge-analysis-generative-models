@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import math
 from matplotlib.lines import Line2D
 
 
@@ -13,6 +14,17 @@ class AblationPlotter:
         self.output_dir = Path(output_dir) / "figures"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.config = config
+
+    @staticmethod
+    def percentage(row, metric):
+        """Return the signed MSE change relative to the original model."""
+        baseline = float(row[f"test_base_{'target' if metric == 'test_target_gain' else 'source'}_mse"])
+        return 100 * float(row[metric]) / baseline if baseline > 0 else math.nan
+
+    @staticmethod
+    def add_metric_formulas(figure):
+        figure.text(0.5, 0.10, "Target gain (%) = 100 × (original target MSE − adapted target MSE) / original target MSE", ha="center", va="center", fontsize=9)
+        figure.text(0.5, 0.04, "Source degradation (%) = 100 × (adapted source MSE − original source MSE) / original source MSE", ha="center", va="center", fontsize=9)
 
     def plot_figure_1(self, results):
         self.plot_metric_pair(results, "eta", "m", "η", "M", "Effect of regularization weight", "figure_1_eta.png")
@@ -29,16 +41,16 @@ class AblationPlotter:
         ordinary_rows = [row for row in results if float(row["eta"]) == 0]
         color_values = sorted({float(row[color_name]) for row in regularized_rows})
         colors = {value: plt.get_cmap("tab10")(index) for index, value in enumerate(color_values)}
-        metrics = [("test_target_gain", "Target gain (×10⁻³) ↑"), ("test_source_degradation", "Source degradation (×10⁻³) ↓")]
-        figure, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharex=True)
+        metrics = [("test_target_gain", "Target gain (%) ↑"), ("test_source_degradation", "Source degradation (%) ↓")]
+        figure, axes = plt.subplots(1, 2, figsize=(12, 6.2), sharex=True)
 
         for axis, (metric, y_label) in zip(axes, metrics):
             for color_value in color_values:
                 rows = [row for row in regularized_rows if float(row[color_name]) == color_value]
-                axis.scatter([float(row[x_name]) for row in rows], [1000 * float(row[metric]) for row in rows], s=55, color=colors[color_value], edgecolor="white", linewidth=0.6, alpha=0.8)
+                axis.scatter([float(row[x_name]) for row in rows], [self.percentage(row, metric) for row in rows], s=55, color=colors[color_value], edgecolor="white", linewidth=0.6, alpha=0.8)
 
-            axis.scatter([0.0] * len(ordinary_rows), [1000 * float(row[metric]) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
-            axis.scatter([float(row[x_name]) for row in source_loss_rows], [1000 * float(row[metric]) for row in source_loss_rows], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, zorder=4)
+            axis.scatter([0.0] * len(ordinary_rows), [self.percentage(row, metric) for row in ordinary_rows], s=72, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, zorder=3)
+            axis.scatter([float(row[x_name]) for row in source_loss_rows], [self.percentage(row, metric) for row in source_loss_rows], s=150, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, zorder=4)
             axis.axhline(0, color="0.75", linewidth=0.8)
             axis.set_xlabel(x_label)
             axis.set_ylabel(y_label)
@@ -46,17 +58,19 @@ class AblationPlotter:
 
             if x_name in {"eta", "s"}:
                 positive_values = sorted({float(row[x_name]) for row in regularized_rows + source_loss_rows if float(row[x_name]) > 0})
-                axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
-                axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
+                if positive_values:
+                    axis.set_xscale("symlog", linthresh=positive_values[0] / 2)
+                    axis.set_xticks([0.0, *positive_values], ["0", *[f"{value:g}" for value in positive_values]])
             else:
                 axis.set_xticks(sorted({0, *[int(row[x_name]) for row in regularized_rows + source_loss_rows]}))
 
         handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=colors[value], markeredgecolor="white", markersize=8, label=f"{value:g}") for value in color_values]
         handles.append(Line2D([0], [0], marker="D", color="none", markerfacecolor=self.ORDINARY_COLOR, markersize=8, label="Ordinary LoRA"))
         handles.append(Line2D([0], [0], marker="*", color="none", markerfacecolor=self.SOURCE_LOSS_COLOR, markersize=12, label="Source-loss LoRA"))
-        axes[1].legend(handles=handles, title=color_label, loc="best")
+        figure.legend(handles=handles, title=color_label, loc="upper center", bbox_to_anchor=(0.5, 0.94), ncol=min(len(handles), 6), frameon=False)
         figure.suptitle(title)
-        figure.tight_layout()
+        self.add_metric_formulas(figure)
+        figure.tight_layout(rect=(0, 0.16, 1, 0.83))
         figure.savefig(self.output_dir / filename, dpi=200)
         plt.close(figure)
 
@@ -64,16 +78,17 @@ class AblationPlotter:
         regularized_rows = [row for row in results if float(row["eta"]) != 0 and row.get("mode") != "source_loss"]
         source_loss_rows = [row for row in results if row.get("mode") == "source_loss"]
         ordinary_rows = [row for row in results if float(row["eta"]) == 0]
-        figure, axis = plt.subplots(figsize=(7.5, 6))
-        axis.scatter([1000 * float(row["test_source_degradation"]) for row in regularized_rows], [1000 * float(row["test_target_gain"]) for row in regularized_rows], s=58, color=self.REGULARIZED_COLOR, edgecolor="white", linewidth=0.6, alpha=0.8, label="Regularized LoRA")
-        axis.scatter([1000 * float(row["test_source_degradation"]) for row in ordinary_rows], [1000 * float(row["test_target_gain"]) for row in ordinary_rows], s=82, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA", zorder=3)
-        axis.scatter([1000 * float(row["test_source_degradation"]) for row in source_loss_rows], [1000 * float(row["test_target_gain"]) for row in source_loss_rows], s=160, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, label="Source-loss LoRA", zorder=4)
-        axis.set_xlabel("Source degradation (×10⁻³) ↓")
-        axis.set_ylabel("Target gain (×10⁻³) ↑")
+        figure, axis = plt.subplots(figsize=(9, 7.2))
+        axis.scatter([self.percentage(row, "test_source_degradation") for row in regularized_rows], [self.percentage(row, "test_target_gain") for row in regularized_rows], s=58, color=self.REGULARIZED_COLOR, edgecolor="white", linewidth=0.6, alpha=0.8, label="Regularized LoRA")
+        axis.scatter([self.percentage(row, "test_source_degradation") for row in ordinary_rows], [self.percentage(row, "test_target_gain") for row in ordinary_rows], s=82, marker="D", color=self.ORDINARY_COLOR, edgecolor="white", linewidth=0.7, label="Ordinary LoRA", zorder=3)
+        axis.scatter([self.percentage(row, "test_source_degradation") for row in source_loss_rows], [self.percentage(row, "test_target_gain") for row in source_loss_rows], s=160, marker="*", color=self.SOURCE_LOSS_COLOR, edgecolor="white", linewidth=0.7, label="Source-loss LoRA", zorder=4)
+        axis.set_xlabel("Source degradation (%) ↓")
+        axis.set_ylabel("Target gain (%) ↑")
         axis.set_title("Target learning versus source preservation")
         axis.grid(color="0.9", linestyle="--", linewidth=0.7)
         axis.legend()
-        figure.tight_layout()
+        self.add_metric_formulas(figure)
+        figure.tight_layout(rect=(0, 0.16, 1, 1))
         figure.savefig(self.output_dir / "figure_4_target_source_tradeoff.png", dpi=200)
         plt.close(figure)
 
