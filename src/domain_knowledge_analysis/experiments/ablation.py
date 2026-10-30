@@ -1,9 +1,12 @@
 from copy import deepcopy
 from contextlib import redirect_stderr, redirect_stdout
+from hashlib import sha256
+from importlib.metadata import version
 from multiprocessing import get_context
 from pathlib import Path
 
 import csv
+import json
 import signal
 import sys
 import torch
@@ -75,6 +78,8 @@ class Ablation:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.runs = generate_model_runs(self.base_config, self.ablation_config, self.output_dir)
+        self.fid = None
+        self.fid_reference_key = None
 
     def run(self):
         print(f"Ablation contains {len(self.runs)} unique models.")
@@ -86,25 +91,32 @@ class Ablation:
         for row in saved_results.values():
             row.setdefault("test_target_fid", "")
             row.setdefault("fid_seed", "")
+            row.setdefault("checkpoint_hash", "")
+            row.setdefault("fid_key", "")
 
         for index, run in enumerate(self.runs):
             print(f"\nModel {index + 1}/{len(self.runs)}: {run['model_dir'].name}")
+            config = utils.load_config(run["config_path"])
+            target_dataloader = utils.create_testing_dataloaders(config, config["lora"]["transformed_dataset"])
+            reference_key, fid_key = self.prepare_fid(target_dataloader)
+            checkpoint_path = run["model_dir"] / "checkpoints" / "best.pt"
+            checkpoint_hash = sha256(checkpoint_path.read_bytes()).hexdigest()
+            saved_row = saved_results.get(run["model_id"], {})
+            checkpoint_matches = saved_row.get("checkpoint_hash") == checkpoint_hash
 
-            if run["model_id"] in saved_results and saved_results[run["model_id"]]["test_target_fid"] != "" and saved_results[run["model_id"]]["fid_seed"] == int(self.ablation_config["fid_seed"]):
+            if checkpoint_matches and saved_row["test_target_fid"] != "" and saved_row["fid_key"] == fid_key:
                 print("Using saved metrics.")
                 results.append(saved_results[run["model_id"]])
                 continue
 
             experiment = self.load_or_train(run)
-            if run["model_id"] in saved_results:
+            if checkpoint_matches:
                 print("Computing missing FID.")
-                transformation_config = experiment.config["lora"]["transformed_dataset"]
-                target_test_dataloader = utils.create_testing_dataloaders(experiment.config, transformation_config)
-                row = saved_results[run["model_id"]]
-                row["test_target_fid"] = self.score_fid(experiment, target_test_dataloader)
+                row = saved_row
+                row["test_target_fid"] = self.score_fid(experiment, target_dataloader, reference_key)
                 row["fid_seed"] = int(self.ablation_config["fid_seed"])
             else:
-                metrics = self.evaluate(experiment)
+                metrics = self.evaluate(experiment, target_dataloader, reference_key)
 
                 row = {
                     "model_id": run["model_id"],
@@ -120,6 +132,8 @@ class Ablation:
                     **metrics,
                 }
 
+            row["checkpoint_hash"] = checkpoint_hash
+            row["fid_key"] = fid_key
             results.append(row)
             saved_results[run["model_id"]] = row
             save_rows(list(saved_results.values()), metrics_path)
@@ -164,7 +178,7 @@ class Ablation:
         with open(metrics_path, newline="") as file:
             rows = list(csv.DictReader(file))
 
-        text_fields = {"model_id", "model_dir", "config_path", "mode", "subset"}
+        text_fields = {"model_id", "model_dir", "config_path", "mode", "subset", "checkpoint_hash", "fid_key"}
 
         for row in rows:
             for key, value in row.items():
@@ -259,40 +273,96 @@ class Ablation:
 
         return experiment
 
-    def evaluate(self, experiment):
+    def evaluate(self, experiment, target_test_dataloader, reference_key):
         transformation_config = experiment.config["lora"]["transformed_dataset"]
         _, source_validation_dataloader = utils.create_training_dataloaders(experiment.config)
         _, target_validation_dataloader = utils.create_training_dataloaders(experiment.config, transformation_config)
         source_test_dataloader = utils.create_testing_dataloaders(experiment.config)
-        target_test_dataloader = utils.create_testing_dataloaders(experiment.config, transformation_config)
 
         validation_metrics = self.score_split(experiment, target_validation_dataloader, source_validation_dataloader)
         test_metrics = self.score_split(experiment, target_test_dataloader, source_test_dataloader)
         return {
             **{f"validation_{name}": value for name, value in validation_metrics.items()},
             **{f"test_{name}": value for name, value in test_metrics.items()},
-            "test_target_fid": self.score_fid(experiment, target_test_dataloader),
+            "test_target_fid": self.score_fid(experiment, target_test_dataloader, reference_key),
             "fid_seed": int(self.ablation_config["fid_seed"]),
         }
 
-    def score_fid(self, experiment, target_dataloader):
+    def prepare_fid(self, target_dataloader):
         from torchmetrics.image.fid import FrechetInceptionDistance
 
-        device = experiment.device if experiment.device.type == "cuda" else torch.device("cpu")
-        fid = FrechetInceptionDistance(feature=2048, normalize=True).set_dtype(torch.float64).to(device)
+        device = utils.get_device()
+        device = device if device.type == "cuda" else torch.device("cpu")
+
+        if self.fid is None:
+            self.fid = FrechetInceptionDistance(feature=2048, normalize=True, reset_real_features=False, antialias=True)
+            weights_hash = sha256()
+            for name, tensor in self.fid.inception.state_dict().items():
+                weights_hash.update(name.encode())
+                weights_hash.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+            self.fid_weights_hash = weights_hash.hexdigest()
+            self.fid.to(device)
+
+        images = target_dataloader.dataset.tensors[0].contiguous()
+        reference_hash = sha256(images.numpy().tobytes())
+        code_hash = sha256()
+        for path in sorted((Path(__file__).resolve().parents[1]).rglob("*.py")):
+            code_hash.update(path.read_bytes())
+        settings = {"shape": list(images.shape), "dtype": str(images.dtype), "weights": self.fid_weights_hash, "torch": torch.__version__, "torchmetrics": version("torchmetrics"), "torch-fidelity": version("torch-fidelity"), "device": str(device), "cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(), "feature": 2048, "antialias": True, "inception_dtype": "float32", "statistics_dtype": "float64", "batch_size": int(self.ablation_config["fid_batch_size"]), "code": code_hash.hexdigest()}
+        if device.type == "cuda":
+            settings["gpu"] = torch.cuda.get_device_name(device)
+            settings["tf32"] = False
+            settings["matmul_tf32"] = torch.backends.cuda.matmul.allow_tf32
+            settings["cudnn_enabled"] = torch.backends.cudnn.enabled
+            settings["cudnn_deterministic"] = torch.backends.cudnn.deterministic
+            settings["cudnn_benchmark"] = torch.backends.cudnn.benchmark
+        reference_hash.update(json.dumps(settings, sort_keys=True).encode())
+        reference_key = reference_hash.hexdigest()
+        score_settings = {"reference": reference_key, "seed": int(self.ablation_config["fid_seed"])}
+        fid_key = sha256(json.dumps(score_settings, sort_keys=True).encode()).hexdigest()
+        return reference_key, fid_key
+
+    def score_fid(self, experiment, target_dataloader, reference_key):
+        device = self.fid.real_features_sum.device
+        batch_size = int(self.ablation_config["fid_batch_size"])
+        dataset = target_dataloader.dataset
+        fid_dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+        cache_path = self.output_dir / "results" / "fid_reference" / f"{reference_key}.pt"
+        self.fid.reset()
+
+        if self.fid_reference_key != reference_key:
+            self.fid.real_features_sum.zero_()
+            self.fid.real_features_cov_sum.zero_()
+            self.fid.real_features_num_samples.zero_()
+            if cache_path.exists():
+                statistics = torch.load(cache_path, map_location=device, weights_only=True)
+                self.fid.real_features_sum.copy_(statistics["sum"])
+                self.fid.real_features_cov_sum.copy_(statistics["cov_sum"])
+                self.fid.real_features_num_samples.copy_(statistics["count"])
+            else:
+                with torch.no_grad(), torch.backends.cudnn.flags(enabled=torch.backends.cudnn.enabled, benchmark=torch.backends.cudnn.benchmark, deterministic=torch.backends.cudnn.deterministic, allow_tf32=False):
+                    for images, _ in fid_dataloader:
+                        self.fid.update(images.to(device).repeat(1, 3, 1, 1), real=True)
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                statistics = {"sum": self.fid.real_features_sum.cpu(), "cov_sum": self.fid.real_features_cov_sum.cpu(), "count": self.fid.real_features_num_samples.cpu()}
+                temporary_path = cache_path.with_suffix(".tmp")
+                torch.save(statistics, temporary_path)
+                temporary_path.replace(cache_path)
+            self.fid_reference_key = reference_key
+
         generator = utils.create_random_generator(self.ablation_config["fid_seed"])
         latent_dim = experiment.model.encoder_params["latent_dim"]
+        latents = utils.sample_random_latents(len(dataset), latent_dim, generator)
         experiment.lora_manager.enable_adapters()
         experiment.model.eval()
 
-        with torch.no_grad():
-            for images, _ in target_dataloader:
-                latents = utils.sample_random_latents(len(images), latent_dim, generator)
-                generated = experiment.model.generate_images(len(images), latents)
-                fid.update(images.to(device).repeat(1, 3, 1, 1), real=True)
-                fid.update(generated.to(device).clamp(0, 1).repeat(1, 3, 1, 1), real=False)
+        with torch.no_grad(), torch.backends.cudnn.flags(enabled=torch.backends.cudnn.enabled, benchmark=torch.backends.cudnn.benchmark, deterministic=torch.backends.cudnn.deterministic, allow_tf32=False):
+            for start in range(0, len(dataset), batch_size):
+                batch_latents = latents[start:start + batch_size]
+                generated = experiment.model.generate_images(len(batch_latents), batch_latents)
+                self.fid.update(generated.to(device).clamp(0, 1).repeat(1, 3, 1, 1), real=False)
 
-        return fid.compute().item()
+        return self.fid.compute().item()
 
     def score_split(self, experiment, target_dataloader, source_dataloader):
         scorer = AdaptationScorer(experiment.model, experiment.lora_manager, target_dataloader, source_dataloader, experiment.config, experiment.device)

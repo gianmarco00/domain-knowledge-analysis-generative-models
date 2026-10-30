@@ -1,4 +1,5 @@
 from concurrent.futures import ProcessPoolExecutor
+from hashlib import sha256
 from multiprocessing import get_context
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -230,28 +231,35 @@ def test_score_split_computes_target_gain_and_source_degradation(monkeypatch):
     assert metrics["source_degradation"] == pytest.approx(0.03)
 
 
-def test_fid_uses_target_test_images_and_prior_samples_with_adapters(monkeypatch):
+def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, monkeypatch):
     from torchmetrics.image import fid as fid_module
 
     class FakeFID:
         instances = []
 
-        def __init__(self, feature, normalize):
+        def __init__(self, feature, normalize, reset_real_features, antialias):
             assert feature == 2048
             assert normalize is True
+            assert reset_real_features is False
+            assert antialias is True
+            self.inception = torch.nn.Linear(1, 1)
+            self.real_features_sum = torch.zeros(1, dtype=torch.float64)
+            self.real_features_cov_sum = torch.zeros(1, 1, dtype=torch.float64)
+            self.real_features_num_samples = torch.tensor(0)
             self.real = []
             self.fake = []
             self.__class__.instances.append(self)
 
-        def set_dtype(self, dtype):
-            assert dtype == torch.float64
-            return self
-
         def to(self, device):
             return self
 
+        def reset(self):
+            self.fake = []
+
         def update(self, images, real):
             (self.real if real else self.fake).append(images.clone())
+            if real:
+                self.real_features_num_samples += len(images)
 
         def compute(self):
             return torch.tensor(12.5)
@@ -279,14 +287,69 @@ def test_fid_uses_target_test_images_and_prior_samples_with_adapters(monkeypatch
     model = FakeModel(manager)
     experiment = type("Experiment", (), {"model": model, "lora_manager": manager, "device": torch.device("cpu")})()
     ablation = Ablation.__new__(Ablation)
-    ablation.ablation_config = {"fid_seed": 123}
+    ablation.ablation_config = {"fid_seed": 123, "fid_batch_size": 2}
+    ablation.output_dir = tmp_path
+    ablation.fid = None
+    ablation.fid_reference_key = None
 
-    assert ablation.score_fid(experiment, dataloader) == 12.5
+    reference_key, fid_key = ablation.prepare_fid(dataloader)
+    assert ablation.score_fid(experiment, dataloader, reference_key) == 12.5
     first_latents = torch.cat(model.latents)
-    assert ablation.score_fid(experiment, dataloader) == 12.5
+    assert ablation.score_fid(experiment, dataloader, reference_key) == 12.5
     torch.testing.assert_close(torch.cat(model.latents[3:]), first_latents)
+    assert len(FakeFID.instances) == 1
     torch.testing.assert_close(torch.cat(FakeFID.instances[0].real), images.repeat(1, 3, 1, 1))
     torch.testing.assert_close(torch.cat(FakeFID.instances[0].fake), torch.full((5, 3, 2, 2), 0.75))
+    assert FakeFID.instances[0].real_features_num_samples.item() == 5
+
+    ablation.fid_reference_key = None
+    ablation.fid.real.clear()
+    assert ablation.score_fid(experiment, dataloader, reference_key) == 12.5
+    assert ablation.fid.real == []
+    assert ablation.fid.real_features_num_samples.item() == 5
+
+    images[0] = 0
+    changed_reference_key, changed_fid_key = ablation.prepare_fid(dataloader)
+    assert changed_reference_key != reference_key
+    assert changed_fid_key != fid_key
+    assert ablation.score_fid(experiment, dataloader, changed_reference_key) == 12.5
+    assert ablation.fid.real_features_num_samples.item() == 5
+    ablation.ablation_config["fid_seed"] = 456
+    same_reference_key, different_seed_key = ablation.prepare_fid(dataloader)
+    assert same_reference_key == changed_reference_key
+    assert different_seed_key != changed_fid_key
+
+
+def test_saved_results_are_invalidated_when_checkpoint_changes(tmp_path, monkeypatch):
+    metrics_path = tmp_path / "results" / "metrics.csv"
+    metrics_path.parent.mkdir()
+    checkpoint_path = tmp_path / "model" / "checkpoints" / "best.pt"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_bytes(b"first checkpoint")
+    row = {"model_id": "abc", "seed": 42, "m": 5, "extra_run": False, "test_target_fid": 12.5, "fid_seed": 123, "checkpoint_hash": sha256(checkpoint_path.read_bytes()).hexdigest(), "fid_key": "fid-key"}
+    with open(metrics_path, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+
+    ablation = Ablation.__new__(Ablation)
+    ablation.output_dir = tmp_path
+    ablation.ablation_config = {"fid_seed": 123, "target_gain_fraction": 0.99}
+    ablation.runs = [{"model_id": "abc", "model_dir": checkpoint_path.parent.parent, "config_path": tmp_path / "config.yaml"}]
+    ablation.train_models = Mock()
+    ablation.prepare_fid = Mock(return_value=("reference", "fid-key"))
+    ablation.load_or_train = Mock(side_effect=RuntimeError("checkpoint needs evaluation"))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.load_config", Mock(return_value={"lora": {"transformed_dataset": {}}}))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_testing_dataloaders", Mock(return_value=object()))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.select_best_models", Mock(side_effect=RuntimeError("saved result reused")))
+
+    with pytest.raises(RuntimeError, match="saved result reused"):
+        ablation.run()
+    ablation.load_or_train.assert_not_called()
+
+    checkpoint_path.write_bytes(b"different checkpoint")
+    with pytest.raises(RuntimeError, match="checkpoint needs evaluation"):
+        ablation.run()
 
 
 def test_load_saved_results_accepts_missing_fid_for_interrupted_migration(tmp_path):
@@ -315,10 +378,16 @@ def test_fid_migration_preserves_unprocessed_saved_metrics(tmp_path, monkeypatch
     ablation = Ablation.__new__(Ablation)
     ablation.output_dir = tmp_path
     ablation.ablation_config = {"fid_seed": 123}
-    ablation.runs = [{"model_id": name, "model_dir": tmp_path / name} for name in ["first", "second"]]
+    ablation.runs = [{"model_id": name, "model_dir": tmp_path / name, "config_path": tmp_path / name / "config.yaml", "seed": 42, "eta": 10.0, "mode": "output_gram", "m": 5, "s": 0.1, "subset": "rotation", "extra_run": False} for name in ["first", "second"]]
+    for run in ablation.runs:
+        checkpoint = run["model_dir"] / "checkpoints" / "best.pt"
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_bytes(b"checkpoint")
     ablation.train_models = Mock()
     ablation.load_or_train = Mock(side_effect=[experiment, RuntimeError("interrupted")])
-    ablation.score_fid = Mock(return_value=12.5)
+    ablation.prepare_fid = Mock(return_value=("reference", "fid-key"))
+    ablation.evaluate = Mock(return_value={"validation_target_gain": 0.1, "test_target_fid": 12.5, "fid_seed": 123})
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.load_config", Mock(return_value=experiment.config))
     monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_testing_dataloaders", Mock(return_value=object()))
 
     with pytest.raises(RuntimeError, match="interrupted"):
