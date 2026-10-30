@@ -1,0 +1,41 @@
+base_config: config/lora_vae_ellipsis.yaml
+
+ablation:
+  output_dir: ablations/vae_ellipsis_rotated_ellipsis_output_gram_beta_2
+  parallel_models: 2
+  source_label: Horizontal ellipses
+  target_label: Rotated horizontal ellipses
+
+  regularizer_mode: output_gram
+  seeds: [42]
+  eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0]
+  m_values: [5, 10, 16]
+  s_values: [0.1, 0.5, 0.75]
+  extra_runs:
+    - {seed: 42, eta: 1.0, mode: source_loss}
+  target_gain_fraction: 0.95
+
+  visual_seed: 123
+  fid_seed: 123
+  fid_batch_size: 512
+  num_qualitative_images: 6
+  num_response_images: 2
+  response_transformations: [horizontal_translation, vertical_translation, isotropic_scale, aspect_ratio_deformation]
+
+  semantic_transformations:
+    - {name: horizontal_translation, intensity: 2}
+    - {name: vertical_translation, intensity: 2}
+    - {name: isotropic_scale, intensity: 1.10}
+    - {name: aspect_ratio_deformation, intensity: 1.10}
+    - {name: diagonal_shear, intensity: 0.12}
+    - {name: vertical_shear, intensity: 0.12}
+    - {name: stroke_thickness, intensity: 0.5}
+    - {name: gaussian_blur, intensity: 0.7}
+    - {name: rotation, intensity: 15.0}
+    - {name: horizontal_wave, intensity: 2.0}
+    - {name: vertical_wave, intensity: 2.0}
+    - {name: perspective, intensity: 0.2}
+    - {name: vertical_perspective, intensity: 0.2}
+    - {name: swirl, intensity: 0.5}
+    - {name: radial_bulge, intensity: 0.5}
+    - {name: vignette, intensity: 0.5}

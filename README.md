@@ -45,3 +45,31 @@ Then run the lines ablation:
 `config/lora_vae_lines.yaml` defines the source checkpoint and the 90° rotated horizontal target; that target keeps the horizontal lines' original thickness and is different from `vertical_lines_dataset`. Update `pretrained_model` in that file if you want to use a different source checkpoint. To train a single ordinary LoRA model, set `lora.regularizer` to `null`; restore the regularizer settings before running the ablation. The current ablation grid contains 36 regularized models and two baselines. It excludes contrast, gamma correction, binarization, and sharpening because they do not change the binary source images. The FID calculation uses the same Inception-based procedure as the MNIST ablation, requires pretrained weights on first use, and can be slow on CPU. Interpret FID cautiously for these simple images, especially with only 1,000 test examples.
 
 The source run directory is fixed: retraining overwrites its checkpoints. Ablation results are reused by configuration and checkpoint path, not checkpoint contents, so choose a new `ablation.output_dir` before rerunning the study with a different source checkpoint at the same path. The model and training settings are a starting point; check generated samples as well as reconstruction quality before proceeding.
+
+## Ellipsis dataset
+
+`ellipsis_dataset` contains centered, horizontal 28 × 28 grayscale ellipse outlines. Each ellipse has the same proportions, with outer dimensions sampled uniformly from 20 × 10 to 24 × 12 pixels and stroke thickness sampled independently from 1.5 to 3 pixels. The outlines are drawn on a finer grid and averaged to produce smooth grayscale edges. The generator provides 5,000 training-pool images and 1,000 separately generated test images; the existing `train_split` divides the training pool. Some pixel patterns can repeat across splits.
+
+Open `notebooks/visualize_ellipsis_dataset.ipynb` to see examples. In `notebooks/visualize_regularizer_strength.ipynb` or `notebooks/visualize_transformed_dataset.ipynb`, set `DATASET = "ellipsis_dataset"` to inspect its transformations.
+
+To train the VAE on ellipses, run:
+
+```bash
+./.venv/bin/python -c 'from domain_knowledge_analysis.experiments import Experiment; Experiment("config/vae_ellipsis.yaml")'
+```
+
+The best checkpoint is saved at `runs/vae_ellipsis_source/checkpoints/best.pt`. After training, adapt it to 90-degree rotated ellipses with:
+
+```bash
+./.venv/bin/python -c 'from domain_knowledge_analysis.experiments import Experiment; Experiment("config/lora_vae_ellipsis.yaml").adapt()'
+```
+
+The LoRA configuration has its regularizer enabled for use by the ablation. To train a single ordinary LoRA model, set `lora.regularizer` to `null`, and restore it before running the ablation. The source run directory is fixed, so retraining overwrites its checkpoints. `ellipse_dataset` is also accepted as a dataset alias.
+
+To run the ellipse ablation after training the source model:
+
+```bash
+./.venv/bin/python scripts/run_ablation.py config/ablation_vae_ellipsis.yaml
+```
+
+The ablation uses the same grid as the lines study and saves results in `ablations/vae_ellipsis_rotated_ellipsis_output_gram_beta_2`. Choose a new output directory when rerunning with a different source checkpoint at the same path, so that existing models and metrics are not reused.

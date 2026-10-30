@@ -22,6 +22,8 @@ DATASET_ALIASES = {
 
     "pneumonia_mnist": "pneumoniamnist",
     "pneumonia-mnist": "pneumoniamnist",
+
+    "ellipse_dataset": "ellipsis_dataset",
 }
 
 
@@ -41,6 +43,7 @@ MEDMNIST_DATASETS = {
 TRANSFORMATION_IMPLEMENTATION_VERSION = 5
 TRANSFORMED_DATASET_CACHE_VERSION = 5
 LINES_DATASET_VERSION = 2
+ELLIPSIS_DATASET_VERSION = 6
 
 
 def affine_sample(image, theta):
@@ -543,6 +546,12 @@ def create_dataset(config, dataset_name, train):
             seed=config["seed"],
         )
 
+    elif dataset_name == "ellipsis_dataset":
+        dataset = create_ellipsis_dataset(
+            train=train,
+            seed=config["seed"],
+        )
+
     else:
         raise ValueError(
             f"Unsupported dataset: {dataset_name}"
@@ -687,6 +696,8 @@ def create_transformed_datasets(
     cache_version = f"version_{TRANSFORMED_DATASET_CACHE_VERSION}"
     if dataset_name in {"lines_dataset", "vertical_lines_dataset"}:
         cache_version += f"_lines_{LINES_DATASET_VERSION}"
+    elif dataset_name == "ellipsis_dataset":
+        cache_version += f"_ellipsis_{ELLIPSIS_DATASET_VERSION}"
 
     cache_dir = (
         dataset_dir
@@ -936,6 +947,32 @@ def create_lines_dataset(vertical, train, seed):
 
     labels = torch.full((num_images,), int(vertical), dtype=torch.long)
     return TensorDataset(images, labels)
+
+
+def create_ellipsis_dataset(train, seed):
+    """Create centered grayscale ellipses with varying size and stroke thickness."""
+    num_images = 5000 if train else 1000
+    generator = torch.Generator().manual_seed(seed + (0 if train else 1_000_000))
+    thicknesses = 1.5 + 1.5 * torch.rand(num_images, generator=generator)
+    sizes = 1.0 + 0.2 * torch.rand(num_images, generator=generator)
+
+    # Draw on a finer grid, then average each 8x8 block for smooth grayscale edges.
+    resolution = 8
+    coordinates = (torch.arange(28 * resolution) + 0.5) / resolution - 14
+    y, x = torch.meshgrid(coordinates, coordinates, indexing="ij")
+    x_squared, y_squared = x.square(), y.square()
+    images = []
+    for thickness_batch, size_batch in zip(thicknesses.split(100), sizes.split(100)):
+        thickness = thickness_batch[:, None, None]
+        size = size_batch[:, None, None]
+        horizontal_radius, vertical_radius = 10 * size, 5 * size
+        outer_ellipse = x_squared / horizontal_radius.square() + y_squared / vertical_radius.square() <= 1
+        inner_ellipse = x_squared / (horizontal_radius - thickness).square() + y_squared / (vertical_radius - thickness).square() < 1
+        ellipses = (outer_ellipse & ~inner_ellipse).float().unsqueeze(1)
+        images.append(F.avg_pool2d(ellipses, kernel_size=resolution))
+
+    labels = torch.zeros(num_images, dtype=torch.long)
+    return TensorDataset(torch.cat(images), labels)
 
 
 def create_torchvision_dataset(
