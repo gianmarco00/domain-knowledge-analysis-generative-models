@@ -542,3 +542,52 @@ def test_ctrl_c_terminates_and_joins_the_worker_pool(tmp_path, monkeypatch):
 
     assert InterruptedPool.instance.terminated
     assert InterruptedPool.instance.joined
+
+
+@pytest.mark.parametrize("manual_choice", [None, {"eta": 10, "m": 5, "s": 0.1}])
+def test_run_respects_fid_limit_and_manual_override(tmp_path, monkeypatch, manual_choice):
+    from domain_knowledge_analysis.experiments.ablation_utils import save_rows
+    import yaml
+
+    rows = [
+        {"model_id": "lora", "seed": 42, "eta": 0, "m": 0, "s": 0, "mode": "ordinary_lora", "validation_target_gain": 0.1, "validation_source_degradation": 0.05, "test_target_fid": 20},
+        {"model_id": "regularized", "seed": 42, "eta": 10, "m": 5, "s": 0.1, "mode": "output_gram", "validation_target_gain": 0.11, "validation_source_degradation": 0.01, "test_target_fid": 23},
+    ]
+    runs = []
+    for row in rows:
+        model_dir = tmp_path / row["model_id"]
+        checkpoint = model_dir / "checkpoints" / "best.pt"
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_bytes(row["model_id"].encode())
+        row.update(checkpoint_hash=sha256(checkpoint.read_bytes()).hexdigest(), fid_key="fid-key", fid_seed=123, extra_run=False)
+        runs.append({**row, "model_dir": model_dir, "config_path": model_dir / "config.yaml"})
+    save_rows(rows, tmp_path / "results" / "metrics.csv")
+
+    plotter = Mock()
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.AblationPlotter", Mock(return_value=plotter))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.load_config", Mock(return_value={"lora": {"transformed_dataset": {}}}))
+    monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.utils.create_testing_dataloaders", Mock(return_value=object()))
+    ablation = Ablation.__new__(Ablation)
+    ablation.output_dir = tmp_path
+    ablation.ablation_config = {"target_gain_fraction": 0.99, "best_model": manual_choice}
+    ablation.runs = runs
+    ablation.train_models = Mock()
+    ablation.prepare_fid = Mock(return_value=("reference", "fid-key"))
+    ablation.load_or_train = Mock(side_effect=AssertionError("saved FID must be reused"))
+    ablation.create_qualitative_results = Mock(return_value={"prepared": True})
+
+    ablation.run()
+    summary = yaml.safe_load((tmp_path / "results" / "best_models.yaml").read_text())
+    assert summary["max_fid_by_seed"]["42"] == pytest.approx(22.4)
+    plotter.plot_figure_1.assert_called_once()
+    plotter.plot_figure_4.assert_called_once()
+    if manual_choice is None:
+        assert summary["qualitative_selection"] == "unavailable"
+        assert summary["models"]["best_overall"] is None
+        plotter.plot_fid.assert_not_called()
+        ablation.create_qualitative_results.assert_not_called()
+    else:
+        assert summary["qualitative_selection"] == "manual"
+        assert summary["models"]["best_overall"]["model_id"] == "regularized"
+        assert plotter.plot_fid.call_args.args[2] == "manual"
+        assert ablation.create_qualitative_results.call_args.args[0]["model_id"] == "regularized"

@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.experiments.experiment import Experiment
-from domain_knowledge_analysis.experiments.ablation_utils import generate_model_runs, save_rows, save_yaml, select_best_models
+from domain_knowledge_analysis.experiments.ablation_utils import generate_model_runs, save_rows, save_yaml, select_best_models, select_manual_model, validate_fid_increase
 from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
 from domain_knowledge_analysis.scoring import AdaptationScorer
 
@@ -89,6 +89,9 @@ class Ablation:
 
     def run(self):
         print(f"Ablation contains {len(self.runs)} unique models.")
+        manual_choice = self.ablation_config.get("best_model")
+        select_manual_model(self.runs, manual_choice)
+        max_fid_increase = validate_fid_increase(self.ablation_config.get("max_fid_increase_fraction", 0.12))
         self.train_models()
         results = []
         metrics_path = self.output_dir / "results" / "metrics.csv"
@@ -149,31 +152,46 @@ class Ablation:
             experiment.logger.close()
             del experiment
 
-        best_models, selection_summary = select_best_models(results, self.ablation_config["target_gain_fraction"])
-        best_model_rows = [{"selection": selection, "available": model is not None, "required_target_gain": selection_summary["required_target_gain"], **(model or {})} for selection, model in best_models.items()]
+        best_models, selection_summary = select_best_models(results, self.ablation_config["target_gain_fraction"], max_fid_increase, manual_choice)
+        best_model_rows = [{"selection": selection, "available": model is not None,
+                            "required_target_gain": selection_summary["required_target_gain"],
+                            "max_fid_increase_fraction": max_fid_increase,
+                            "max_fid": selection_summary["max_fid_by_seed"].get(str(model.get("seed"))) if model else None,
+                            **(model or {})} for selection, model in best_models.items()]
         selected_model = best_models["best_overall"] or best_models["best_target_gain"]
-        qualitative_selection = "best_overall" if best_models["best_overall"] is not None else "best_target_gain"
+        if manual_choice is not None:
+            qualitative_selection = "manual"
+        elif best_models["best_overall"] is not None:
+            qualitative_selection = "best_overall"
+        elif selected_model is not None:
+            qualitative_selection = "best_target_gain"
+        else:
+            qualitative_selection = "unavailable"
         save_rows(best_model_rows, self.output_dir / "results" / "best_models.csv")
         save_yaml({**selection_summary, "qualitative_selection": qualitative_selection, "models": {selection: dict(model) if model is not None else None for selection, model in best_models.items()}}, self.output_dir / "results" / "best_models.yaml")
 
         plotter = AblationPlotter(self.output_dir, self.ablation_config)
         plotter.plot_figure_1(results)
-        plotter.plot_figure_2(results, selected_model, qualitative_selection)
-        plotter.plot_figure_3(results, selected_model, qualitative_selection)
         plotter.plot_figure_4(results)
-        plotter.plot_fid(results, selected_model, qualitative_selection)
-        plotter.plot_qualitative(self.create_qualitative_results(selected_model))
+        if selected_model is not None:
+            plotter.plot_figure_2(results, selected_model, qualitative_selection)
+            plotter.plot_figure_3(results, selected_model, qualitative_selection)
+            plotter.plot_fid(results, selected_model, qualitative_selection)
+            plotter.plot_qualitative(self.create_qualitative_results(selected_model))
 
         print("\nBest regularized models:")
-
         for selection, model in best_models.items():
             if model is None:
-                print(f"{selection}: unavailable because no model reaches {100 * selection_summary['target_gain_fraction']:g}% of ordinary LoRA target gain")
+                print(f"{selection}: unavailable under the FID and target-gain selection rules")
             else:
                 print(f"{selection}: eta={float(model['eta']):g}, M={int(model['m'])}, s={float(model['s']):g}")
 
-        if best_models["best_overall"] is None:
-            print(f"Figures 5-8 use best_target_gain as a fallback ({100 * selection_summary['best_regularized_target_fraction']:.2f}% of ordinary LoRA target gain).")
+        if qualitative_selection == "manual":
+            print("The YAML best_model override is selected, regardless of automatic eligibility rules.")
+        elif qualitative_selection == "best_target_gain":
+            print("No model met both the target-gain and FID rules; selected the FID-eligible best target-gain model as a fallback.")
+        elif qualitative_selection == "unavailable":
+            print("No regularized model meets the FID limit. Figures 2, 3 and 5-9 were not regenerated; any existing versions are from a previous run.")
 
         print(f"Results saved in: {self.output_dir}")
 

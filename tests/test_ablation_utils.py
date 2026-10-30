@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain_knowledge_analysis.experiments.ablation_utils import create_training_config, generate_model_runs, select_best_models, select_named_transformations, select_transformation_prefix, training_config_id
+from domain_knowledge_analysis.experiments.ablation_utils import create_training_config, generate_model_runs, select_best_models, select_manual_model, select_named_transformations, select_transformation_prefix, training_config_id
 
 
 def load_configs():
@@ -120,6 +120,8 @@ def test_best_models_use_validation_metrics_and_the_99_percent_lora_rule():
         {"model_id": "source_loss", "mode": "source_loss", "eta": 1.0, "validation_target_gain": 0.2, "validation_source_degradation": 0.0},
     ]
 
+    for row in results:
+        row["test_target_fid"] = 20.0
     selected, selection_summary = select_best_models(results)
 
     assert selection_summary["required_target_gain"] == pytest.approx(0.099)
@@ -135,6 +137,8 @@ def test_best_model_selection_records_when_no_model_reaches_the_target_rule():
         {"eta": 10.0, "validation_target_gain": 0.09, "validation_source_degradation": 0.01},
     ]
 
+    for row in results:
+        row["test_target_fid"] = 20.0
     selected, selection_summary = select_best_models(results)
 
     assert selected["best_overall"] is None
@@ -148,3 +152,57 @@ def test_regularized_ablation_explains_missing_base_regularizer():
     base["lora"]["regularizer"] = None
     with pytest.raises(ValueError, match="base config must define lora.regularizer"):
         create_training_config(base, 42, 10, config["semantic_transformations"][:5], 0.1)
+
+
+def test_fid_limit_uses_each_seed_baseline_and_includes_boundary():
+    results = [
+        {"model_id": "lora1", "seed": 1, "eta": 0, "test_target_fid": 20, "validation_target_gain": 0.1, "validation_source_degradation": 0.1},
+        {"model_id": "lora2", "seed": 2, "eta": 0, "test_target_fid": 10, "validation_target_gain": 0.1, "validation_source_degradation": 0.1},
+        {"model_id": "boundary", "seed": 1, "eta": 10, "m": 5, "s": 0.1, "test_target_fid": 22.4, "validation_target_gain": 0.1, "validation_source_degradation": 0.03},
+        {"model_id": "too_high", "seed": 1, "eta": 100, "m": 5, "s": 0.1, "test_target_fid": 22.4001, "validation_target_gain": 0.2, "validation_source_degradation": 0.001},
+        {"model_id": "other_seed", "seed": 2, "eta": 10, "m": 5, "s": 0.1, "test_target_fid": 15, "validation_target_gain": 0.2, "validation_source_degradation": 0.001},
+    ]
+    selected, summary = select_best_models(results)
+    assert selected["best_overall"]["model_id"] == "boundary"
+    assert selected["best_target_gain"]["model_id"] == "boundary"
+    assert selected["best_source_degradation"]["model_id"] == "boundary"
+    assert summary["num_fid_eligible_models"] == 1
+    assert summary["max_fid_by_seed"] == {"1": pytest.approx(22.4), "2": pytest.approx(11.2)}
+
+
+def test_no_fid_eligible_model_does_not_become_fallback():
+    results = [
+        {"eta": 0, "seed": 1, "test_target_fid": 20, "validation_target_gain": 0.1},
+        {"eta": 10, "seed": 1, "test_target_fid": 23, "validation_target_gain": 0.2, "validation_source_degradation": 0.01},
+    ]
+    selected, summary = select_best_models(results)
+    assert all(model is None for model in selected.values())
+    assert summary["num_fid_eligible_models"] == 0
+
+
+def test_manual_best_model_overrides_fid_and_gain_rules_and_rejects_ambiguity():
+    results = [
+        {"model_id": "baseline", "eta": 0, "seed": 1, "test_target_fid": 20, "validation_target_gain": 0.1},
+        {"model_id": "automatic", "eta": 10, "m": 5, "s": 0.1, "seed": 1, "mode": "output_gram", "test_target_fid": 20, "validation_target_gain": 0.1, "validation_source_degradation": 0.02},
+        {"model_id": "manual", "eta": 100, "m": 5, "s": 0.5, "seed": 1, "mode": "output_gram", "test_target_fid": 30, "validation_target_gain": 0.05, "validation_source_degradation": 0.01},
+    ]
+    choice = {"eta": 100, "m": 5, "s": 0.5}
+    selected, summary = select_best_models(results, manual_choice=choice)
+    assert selected["best_overall"]["model_id"] == "manual"
+    assert summary["automatic_best_overall_model_id"] == "automatic"
+    assert summary["manual_best_model"] == choice
+    assert select_manual_model(results, {**choice, "seed": 1})["model_id"] == "manual"
+    duplicate = {**results[-1], "model_id": "different", "seed": 2}
+    with pytest.raises(ValueError, match="matches 2 runs"):
+        select_manual_model(results + [duplicate], choice)
+    assert select_manual_model(results + [duplicate], {**choice, "seed": 2})["model_id"] == "different"
+    with pytest.raises(ValueError, match="No regularized model matches"):
+        select_manual_model(results, {**choice, "s": 0.75})
+    with pytest.raises(ValueError, match="Invalid best_model"):
+        select_manual_model(results, {"eta": 100, "m": 5})
+
+
+@pytest.mark.parametrize("fraction", [-0.1, float("nan"), float("inf"), "invalid"])
+def test_fid_tolerance_must_be_finite_and_nonnegative(fraction):
+    with pytest.raises(ValueError, match="max_fid_increase_fraction"):
+        select_best_models([], max_fid_increase_fraction=fraction)

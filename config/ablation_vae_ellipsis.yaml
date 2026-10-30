@@ -13,6 +13,10 @@ ablation:
   s_values: [0.1, 0.5, 0.75]
   extra_runs:
     - {seed: 42, eta: 1.0, mode: source_loss}
+  # Set best_model to {eta: 1000.0, m: 10, s: 0.1} to override automatic selection.
+  # Add seed, mode, subset or model_id if these hyperparameters match multiple runs.
+  best_model: null
+  max_fid_increase_fraction: 0.12
   target_gain_fraction: 0.95
 
   visual_seed: 123

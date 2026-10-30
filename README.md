@@ -10,9 +10,25 @@ The FID batch size is set separately as `fid_batch_size` (default 512). Reduce i
 
 Figures 1–4 express each model’s signed test reconstruction MSE change as a percentage of ordinary LoRA’s change for the same seed. Target gain is 100 × (source VAE target MSE − model target MSE) / (source VAE target MSE − ordinary LoRA target MSE). Source degradation is 100 × (model source MSE − source VAE source MSE) / (ordinary LoRA source MSE − source VAE source MSE). Ordinary LoRA therefore equals 100% for each metric when its change is nonzero. A zero denominator makes the percentage undefined, so the corresponding point is omitted. Negative reference changes reverse the direction of the percentage scale. The CSV and model selection retain the original absolute MSE differences.
 
-Figure 1 has a pair of plots for each transformation strength. Figures 2 and 9 show the selected best-overall model’s strength, and figure 3 shows its regularization weight. If no best-overall model is eligible, they use the best-target-gain fallback and say so in their titles. Lines connect comparable runs within each seed; FID points are not connected.
+Figure 1 has a pair of plots for each transformation strength. Figures 2 and 9 show the selected best-overall model’s strength, and figure 3 shows its regularization weight. If no best-overall model is eligible, they use the FID-eligible best-target-gain fallback and say so in their titles. Lines connect comparable runs within each seed; FID points are not connected.
 
-Inception was trained on natural images, so these FID values are best interpreted as a relative comparison within this study rather than a definitive measure of MNIST image quality. Model selection still uses the validation reconstruction metrics.
+Inception was trained on natural images, so these FID values are best interpreted as a relative comparison within this study rather than a definitive measure of image quality.
+
+### Best-model selection
+
+Automatic selection first excludes regularized models whose **test** target FID exceeds `max_fid_increase_fraction` above ordinary LoRA's FID for the same seed. The default is `0.12`: an ordinary LoRA FID of 20 permits FID values up to and including 22.4. Among the remaining models, best overall retains the existing validation target-gain requirement and minimizes validation source degradation. Best-target-gain and best-source-degradation summaries also use FID-eligible models. If none meets both rules, the FID-eligible best-target-gain model is used as a fallback. If none meets the FID limit, no model is selected: figures 2, 3, and 5–9 are not regenerated, and files from earlier runs may still be present. `results/best_models.yaml` records the thresholds, eligibility counts, and the actual selection.
+
+You can choose a specific regularized model in the ablation YAML:
+
+```yaml
+ablation:
+  max_fid_increase_fraction: 0.12
+  best_model: {eta: 1000.0, m: 10, s: 0.1, seed: 42}
+```
+
+Set `best_model: null` for automatic selection. The override selects the specified existing run even when it fails the automatic FID or gain rules; the output records it as manual. `eta`, `m`, and `s` are required. Add `seed`, `mode`, `subset`, or `model_id` when needed to identify exactly one run; missing or ambiguous matches stop the run before model training. The filtered plots and qualitative figures use the manual model.
+
+The FID criterion uses held-out test images, so choosing a model with it makes the test set part of model selection. Use a separate final evaluation set if an unbiased final test is needed.
 
 ## Lines datasets
 

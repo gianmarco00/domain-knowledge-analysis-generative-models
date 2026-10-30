@@ -101,7 +101,7 @@ class AblationPlotter:
 
     @staticmethod
     def selection_label(selection):
-        return "best overall" if selection == "best_overall" else "best target gain fallback"
+        return {"best_overall": "best overall", "best_target_gain": "best target gain fallback", "manual": "manually selected"}[selection]
 
     def plot_metric_pair(self, results, x_name, color_name, x_label, color_label, title, filename, facets=None, filters=None):
         regularized, ordinary, source_loss = self.split_rows(results)
