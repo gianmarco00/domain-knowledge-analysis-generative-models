@@ -6,7 +6,7 @@ pretrained_model: null
 paths:
   dataset_dir: datasets
   runs_dir: runs
-  run_dir: runs/vae_lines
+  run_dir: runs/vae_lines_beta_2
 
 dataset:
   name: lines_dataset
@@ -27,7 +27,7 @@ training:
 loss:
   name: vae_loss
   log_prob_function: bernoulli
-  beta: 1.0
+  beta: 2.0
 
 model:
   name: vae
