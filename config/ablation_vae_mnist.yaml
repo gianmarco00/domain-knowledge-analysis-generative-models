@@ -1,20 +1,20 @@
-base_config: config/lora_vae_mnist.yaml
+base_config: config/lora_vae_mnist_unnormalized.yaml
 
 ablation:
-  output_dir: ablations/vae_mnist_rotated_mnist_output_gram
+  output_dir: ablations/vae_mnist_rotated_mnist_output_gram_unnormalized
   parallel_models: 2
 
   regularizer_mode: output_gram
   seeds: [42]
   eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0]
-  m_values: [5, 10, 20]
-  s_values: [0.01, 0.1, 0.5]
+  m_values: [5, 20]
+  s_values: [0.01, 0.5, 0.75]
   # Transformation runs also accept s and an ordered list of transformation names.
   extra_runs:
     - {seed: 42, eta: 1.0, mode: source_loss}
   # Set best_model to {eta: 1000.0, m: 10, s: 0.1} to override automatic selection.
   # Add seed, mode, subset or model_id if these hyperparameters match multiple runs.
-  best_model: {eta: 100000.0, m: 20, s: 0.5, seed: 42}
+  best_model: Null
   max_fid_increase_fraction: 0.12
   target_gain_fraction: 0.99
 
