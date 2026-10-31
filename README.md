@@ -1,5 +1,18 @@
 # Domain Knowledge Analysis for Generative Models
 
+## LoRA Gram regularizer
+
+In a LoRA YAML configuration, set the output Gram regularizer's trace normalization as follows:
+
+```yaml
+lora:
+  regularizer:
+    mode: output_gram
+    trace_normalization: false
+```
+
+The default is `true`, including when the option is absent. Setting it to `false` compares the source and adapted Gram matrices without dividing each matrix by its trace, so the loss also reflects the magnitude of the responses. The input RMS scaling and averaging over output dimensions still apply. This can change the loss scale, so `eta` may need retuning. The option applies only to `output_gram`; `encoder_gram` already uses Gram matrices without trace normalization.
+
 ## Ablation FID
 
 Run `python scripts/run_ablation.py` to train or reuse the ablation models and evaluate them. During training, the overall bar counts completed models (including reused checkpoints), and each worker has its own epoch bar. Detailed output is saved in each model directory as `training.log`. Ctrl+C stops the parallel workers. On a later run, models without both `best.pt` and the final `last.pt` are retrained from the source checkpoint; completed models are reused. The results include `test_target_fid` in `results/metrics.csv` and a plot in `figures/figure_9_target_fid.png`. Existing saved metrics are reused, and missing FID values are calculated from the saved checkpoints. The FID plot uses color for M and displays the selected model’s transformation strength s; ordinary LoRA and source-loss LoRA are shown separately.

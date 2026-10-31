@@ -64,6 +64,8 @@ def build_run_name(config):
                 rms_name = f"_RMS_{float(target_input_rms):g}" if target_input_rms is not None else ""
                 strength_name = f"_S_{float(transformation_strength):g}" if transformation_strength is not None else ""
                 mode_name = f"_RM_{regularizer_mode}"
+                if regularizer_mode == "output_gram" and regularizer_config.get("trace_normalization", True) is False:
+                    mode_name += "_no_trace_norm"
 
                 if regularizer_mode != "output_gram":
                     mode_name += f"_RW_{float(regularizer_config.get('response_weight', 1.0)):g}_DW_{float(regularizer_config.get('decoder_weight', 0.0)):g}_DS_{int(regularizer_config.get('decoder_seed', 0))}"

@@ -86,6 +86,7 @@ lora:
     shape: [1, 28, 28]
   regularizer:
     mode: output_gram
+    trace_normalization: true # Set false to retain Gram response magnitudes.
     response_weight: 1.0
     decoder_weight: 1.0
     decoder_seed: 0

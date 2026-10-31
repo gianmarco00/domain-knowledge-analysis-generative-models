@@ -8,7 +8,7 @@ from domain_knowledge_analysis.utils.utils import INPUT_SCALE_FLOOR, RMS_ABSOLUT
 class TFRegularizer(torch.nn.Module):
     VALID_MODES = {"output_gram", "encoder_response", "encoder_gram", "source_loss"}
 
-    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0, loss=None):
+    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0, loss=None, trace_normalization=True):
         super().__init__()
 
         if mode not in self.VALID_MODES:
@@ -17,10 +17,13 @@ class TFRegularizer(torch.nn.Module):
             raise ValueError("Regularizer response_weight must be finite and nonnegative.")
         if not math.isfinite(decoder_weight) or decoder_weight < 0:
             raise ValueError("Regularizer decoder_weight must be finite and nonnegative.")
+        if not isinstance(trace_normalization, bool):
+            raise ValueError("Regularizer trace_normalization must be a boolean.")
 
         self.model = model
         self.lora_manager = lora_manager
         self.mode = mode
+        self.trace_normalization = trace_normalization
         self.response_weight = float(response_weight)
         self.decoder_weight = float(decoder_weight)
         self.decoder_seed = int(decoder_seed)
@@ -185,7 +188,7 @@ class TFRegularizer(torch.nn.Module):
         g_matrix = (response_vector @ response_vector.transpose(-1, -2)) / output_dimension
         g_matrix = g_matrix / self.input_scale_matrix
 
-        if self.mode == "output_gram":
+        if self.mode == "output_gram" and self.trace_normalization:
             trace = torch.diagonal(g_matrix, dim1=-2, dim2=-1).sum(dim=-1)
             g_matrix = g_matrix / trace.clamp_min(1e-12).view(-1, 1, 1)
 

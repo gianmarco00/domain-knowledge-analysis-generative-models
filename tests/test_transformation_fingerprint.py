@@ -183,6 +183,49 @@ def test_batched_gram_matrix_matches_full_gram_matrix():
     torch.testing.assert_close(batched_grams, full_grams, rtol=1e-6, atol=1e-7)
 
 
+@pytest.mark.parametrize("trace_normalization", [True, False])
+def test_output_gram_normalization_calibration_loss_and_gradients(trace_normalization):
+    anchor_points, transformations = make_inputs()
+    model = DummyModel()
+    manager = DummyLoRAManager(model)
+    regularizer = TFRegularizer(model, manager, transformations, anchor_points, anchor_batch_size=len(anchor_points), calibration_batch_size=2, trace_normalization=trace_normalization)
+
+    def expected_grams(response):
+        scaled = response / regularizer.input_scales.view(1, -1, 1)
+        grams = scaled @ scaled.transpose(-1, -2) / scaled.shape[-1]
+        if trace_normalization:
+            traces = grams.diagonal(dim1=-2, dim2=-1).sum(dim=-1)
+            grams = grams / traces.clamp_min(1e-12).view(-1, 1, 1)
+        return grams
+
+    manager.disable_adapters()
+    with torch.no_grad():
+        expected_source = expected_grams(regularizer.model_response())
+    manager.enable_adapters()
+    response = regularizer.model_response()
+    expected_current = expected_grams(response)
+    torch.testing.assert_close(regularizer.source_gram_matrices, expected_source)
+    torch.testing.assert_close(regularizer.gram_matrix(response_vector=response), expected_current)
+    torch.testing.assert_close(regularizer.gram_matrix_batched(batch_size=2), expected_current)
+
+    scaled_grams = regularizer.gram_matrix(response_vector=2 * response)
+    torch.testing.assert_close(scaled_grams, expected_current * (1 if trace_normalization else 4))
+    regularizer.anchor_indices = torch.arange(len(anchor_points))
+    regularizer.anchor_position = 0
+    loss = regularizer()
+    torch.testing.assert_close(loss, (expected_current - expected_source).square().mean())
+    loss.backward()
+    assert model.weight.grad is not None and torch.isfinite(model.weight.grad)
+
+
+def test_output_gram_trace_floor_handles_zero_responses():
+    anchor_points, transformations = make_inputs()
+    model = DummyModel()
+    regularizer = TFRegularizer(model, DummyLoRAManager(model), transformations, anchor_points)
+    response = torch.zeros(len(anchor_points), len(transformations[0]), 4)
+    torch.testing.assert_close(regularizer.gram_matrix(response_vector=response), torch.zeros(len(anchor_points), 3, 3))
+
+
 def test_calibration_never_sends_more_than_one_chunk_to_the_model():
     anchor_points, transformations = make_inputs()
     model = DummyModel()
@@ -357,7 +400,7 @@ def test_encoder_response_loss_reaches_encoder_and_decoder_adapters():
     assert model.adapters_enabled
 
 
-@pytest.mark.parametrize("argument, value, message", [("mode", "unknown", "mode"), ("response_weight", -1.0, "response_weight"), ("decoder_weight", float("nan"), "decoder_weight")])
+@pytest.mark.parametrize("argument, value, message", [("mode", "unknown", "mode"), ("response_weight", -1.0, "response_weight"), ("decoder_weight", float("nan"), "decoder_weight"), ("trace_normalization", "false", "trace_normalization")])
 def test_regularizer_rejects_invalid_modes_and_weights(argument, value, message):
     anchor_points, transformations = make_inputs()
     model = DummyVAE()
