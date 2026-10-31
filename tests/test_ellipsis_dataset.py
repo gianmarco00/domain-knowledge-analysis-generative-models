@@ -6,7 +6,7 @@ from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.utils.dataset_utils import create_ellipsis_dataset
 
 
-def test_ellipses_are_centered_grayscale_and_vary_in_size_and_thickness():
+def test_ellipses_vary_in_position_size_tilt_and_thickness():
     images, labels = create_ellipsis_dataset(train=True, seed=42).tensors
     repeated, _ = create_ellipsis_dataset(train=True, seed=42).tensors
     test, _ = create_ellipsis_dataset(train=False, seed=42).tensors
@@ -18,27 +18,37 @@ def test_ellipses_are_centered_grayscale_and_vary_in_size_and_thickness():
     assert torch.all(labels == 0)
     assert images.min() == 0 and images.max() == 1
     assert ((images > 0) & (images < 1)).any()
-    assert torch.equal(images, images.flip(-1))
-    assert torch.equal(images, images.flip(-2))
-    assert not images[:, :, 13:15, 13:15].any()
+    assert not images[:, :, 0, :].any() and not images[:, :, -1, :].any()
+    assert not images[:, :, :, 0].any() and not images[:, :, :, -1].any()
 
     mask = images > 0
     widths = mask.any(dim=2).sum(dim=-1).squeeze(1)
     heights = mask.any(dim=3).sum(dim=-1).squeeze(1)
-    assert widths.min() >= 20 and widths.max() <= 24
-    assert heights.min() >= 10 and heights.max() <= 12
-    assert widths.unique().numel() > 1 and heights.unique().numel() > 1
+    assert widths.min() <= 11 and widths.max() >= 22
+    assert heights.min() <= 6 and heights.max() >= 11
 
-    # Images with the same outer dimensions can still have different thicknesses.
-    smallest = images[(widths == widths.min()) & (heights == heights.min())]
-    ink = smallest.sum(dim=(1, 2, 3))
-    assert ink.max() - ink.min() > 10
+    # Image moments measure position and tilt without needing generator internals.
+    pixels = images[:, 0]
+    coordinates = torch.arange(28, dtype=torch.float)
+    mass = pixels.sum(dim=(1, 2))
+    center_x = (pixels.sum(dim=1) * coordinates).sum(dim=1) / mass
+    center_y = (pixels.sum(dim=2) * coordinates).sum(dim=1) / mass
+    assert center_x.min() < 8 and center_x.max() > 19
+    assert center_y.min() < 5 and center_y.max() > 22
 
-    # Even a thick, small ellipse has a center that narrows toward its top edge.
-    thickest = smallest[ink.argmax(), 0]
-    center_width = (thickest[13, 8:20] < 0.2).sum()
-    upper_width = (thickest[12, 8:20] < 0.2).sum()
-    assert upper_width < center_width
+    dx = coordinates[None, None, :] - center_x[:, None, None]
+    dy = coordinates[None, :, None] - center_y[:, None, None]
+    covariance = (pixels * dx * dy).sum(dim=(1, 2))
+    variance_x = (pixels * dx.square()).sum(dim=(1, 2))
+    variance_y = (pixels * dy.square()).sum(dim=(1, 2))
+    angles = 0.5 * torch.atan2(2 * covariance, variance_x - variance_y)
+    assert (angles < -0.02).sum() > 500 and (angles > 0.02).sum() > 500
+    assert angles.abs().max() < 0.06  # Allow for pixel rounding around a 5% slope.
+
+    center_pixels = pixels[torch.arange(len(images)), center_y.round().long(), center_x.round().long()]
+    assert (center_pixels < 0.1).sum() > 100  # Open holes.
+    assert (center_pixels > 0.9).sum() > 100  # Filled ellipses.
+    assert ((center_pixels > 0.1) & (center_pixels < 0.9)).sum() > 100
 
 
 def test_ellipsis_dataloaders_and_transformed_splits(tmp_path):
@@ -47,7 +57,7 @@ def test_ellipsis_dataloaders_and_transformed_splits(tmp_path):
     config["paths"]["dataset_dir"] = str(tmp_path)
 
     old_cache = (tmp_path / "transformed" / "ellipsis_dataset" / "rotation_intensity_90"
-                 / "version_5_ellipsis_5" / f'seed_{config["seed"]}_split_{config["dataset"]["train_split"]:g}')
+                 / "version_5_ellipsis_6" / f'seed_{config["seed"]}_split_{config["dataset"]["train_split"]:g}')
     old_cache.mkdir(parents=True)
     (old_cache / "train.pt").write_bytes(b"old ellipses")
     (old_cache / "validation.pt").write_bytes(b"old ellipses")

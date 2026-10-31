@@ -6,7 +6,7 @@ pretrained_model: null
 paths:
   dataset_dir: datasets
   runs_dir: runs
-  run_dir: runs/vae_ellipsis_source
+  run_dir: runs/vae_ellipsis_source_2
 
 dataset:
   name: ellipsis_dataset
@@ -32,7 +32,7 @@ loss:
 model:
   name: vae
   encoder:
-    latent_dim: 2
+    latent_dim: 4
     out_channels: [16, 32, 64]
     kernels: [3, 3, 3]
     strides: [2, 2, 2]

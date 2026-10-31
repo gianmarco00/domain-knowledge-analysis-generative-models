@@ -43,7 +43,7 @@ MEDMNIST_DATASETS = {
 TRANSFORMATION_IMPLEMENTATION_VERSION = 5
 TRANSFORMED_DATASET_CACHE_VERSION = 5
 LINES_DATASET_VERSION = 2
-ELLIPSIS_DATASET_VERSION = 6
+ELLIPSIS_DATASET_VERSION = 7
 
 
 def affine_sample(image, theta):
@@ -950,24 +950,40 @@ def create_lines_dataset(vertical, train, seed):
 
 
 def create_ellipsis_dataset(train, seed):
-    """Create centered grayscale ellipses with varying size and stroke thickness."""
+    """Create grayscale ellipses with varying position, size, tilt and thickness."""
     num_images = 5000 if train else 1000
     generator = torch.Generator().manual_seed(seed + (0 if train else 1_000_000))
-    thicknesses = 1.5 + 1.5 * torch.rand(num_images, generator=generator)
-    sizes = 1.0 + 0.2 * torch.rand(num_images, generator=generator)
+    sizes = 0.5 + 0.6 * torch.rand(num_images, generator=generator)
+    thicknesses = 0.8 + 5.2 * torch.rand(num_images, generator=generator)
+    slopes = -0.05 + 0.1 * torch.rand(num_images, generator=generator)
+    cosines = torch.rsqrt(1 + slopes.square())
+    sines = slopes * cosines
+    horizontal_radii, vertical_radii = 10 * sizes, 5 * sizes
+
+    # Keep a one-pixel margin around the rotated ellipse.
+    half_widths = torch.sqrt((horizontal_radii * cosines).square() + (vertical_radii * sines).square())
+    half_heights = torch.sqrt((horizontal_radii * sines).square() + (vertical_radii * cosines).square())
+    centers_x = (2 * torch.rand(num_images, generator=generator) - 1) * (13 - half_widths)
+    centers_y = (2 * torch.rand(num_images, generator=generator) - 1) * (13 - half_heights)
 
     # Draw on a finer grid, then average each 8x8 block for smooth grayscale edges.
     resolution = 8
     coordinates = (torch.arange(28 * resolution) + 0.5) / resolution - 14
     y, x = torch.meshgrid(coordinates, coordinates, indexing="ij")
-    x_squared, y_squared = x.square(), y.square()
     images = []
-    for thickness_batch, size_batch in zip(thicknesses.split(100), sizes.split(100)):
-        thickness = thickness_batch[:, None, None]
-        size = size_batch[:, None, None]
-        horizontal_radius, vertical_radius = 10 * size, 5 * size
+    for start in range(0, num_images, 100):
+        batch = slice(start, start + 100)
+        thickness = thicknesses[batch, None, None]
+        horizontal_radius = horizontal_radii[batch, None, None]
+        vertical_radius = vertical_radii[batch, None, None]
+        dx, dy = x - centers_x[batch, None, None], y - centers_y[batch, None, None]
+        cosine, sine = cosines[batch, None, None], sines[batch, None, None]
+        x_squared = (cosine * dx + sine * dy).square()
+        y_squared = (cosine * dy - sine * dx).square()
         outer_ellipse = x_squared / horizontal_radius.square() + y_squared / vertical_radius.square() <= 1
-        inner_ellipse = x_squared / (horizontal_radius - thickness).square() + y_squared / (vertical_radius - thickness).square() < 1
+        inner_width = (horizontal_radius - thickness).clamp_min(1e-4)
+        inner_height = (vertical_radius - thickness).clamp_min(1e-4)
+        inner_ellipse = (thickness < vertical_radius) & (x_squared / inner_width.square() + y_squared / inner_height.square() < 1)
         ellipses = (outer_ellipse & ~inner_ellipse).float().unsqueeze(1)
         images.append(F.avg_pool2d(ellipses, kernel_size=resolution))
 

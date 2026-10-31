@@ -64,7 +64,7 @@ The source run directory is fixed: retraining overwrites its checkpoints. Ablati
 
 ## Ellipsis dataset
 
-`ellipsis_dataset` contains centered, horizontal 28 × 28 grayscale ellipse outlines. Each ellipse has the same proportions, with outer dimensions sampled uniformly from 20 × 10 to 24 × 12 pixels and stroke thickness sampled independently from 1.5 to 3 pixels. The outlines are drawn on a finer grid and averaged to produce smooth grayscale edges. The generator provides 5,000 training-pool images and 1,000 separately generated test images; the existing `train_split` divides the training pool. Some pixel patterns can repeat across splits.
+`ellipsis_dataset` contains 28 × 28 grayscale ellipses with varying position, size, tilt, and thickness. Outer dimensions range from 10 × 5 to 22 × 11 pixels, with the same proportions. The slope is sampled uniformly from −5% to +5% (approximately −2.86° to +2.86°). Thickness ranges from 0.8 to 6 pixels; when it reaches the ellipse's vertical radius, the hole closes and the ellipse is filled. Every ellipse fits inside the image with a one-pixel margin. The outlines are drawn on a finer grid and averaged to produce smooth grayscale edges. The generator provides 5,000 training-pool images and 1,000 separately generated test images; the existing `train_split` divides the training pool. Some pixel patterns can repeat across splits.
 
 Open `notebooks/visualize_ellipsis_dataset.ipynb` to see examples. In `notebooks/visualize_regularizer_strength.ipynb` or `notebooks/visualize_transformed_dataset.ipynb`, set `DATASET = "ellipsis_dataset"` to inspect its transformations.
 
@@ -88,4 +88,4 @@ To run the ellipse ablation after training the source model:
 ./.venv/bin/python scripts/run_ablation.py config/ablation_vae_ellipsis.yaml
 ```
 
-The ablation uses the same grid as the lines study, except it includes 20 transformations and tests M = 5, 10, and 20. The four additional intensity transformations act on the ellipses' grayscale pixels. Results are saved in `ablations/vae_ellipsis_rotated_ellipsis_output_gram_beta_2`. Choose a new output directory when rerunning with a different source checkpoint at the same path, so that existing models and metrics are not reused.
+The ablation uses the same grid as the lines study, except it includes 20 transformations and tests M = 5, 10, and 20. The four additional intensity transformations act on the ellipses' grayscale pixels. Results are saved in `ablations/vae_ellipsis_rotated_ellipsis_output_gram`. Choose a new output directory when rerunning with a different source checkpoint at the same path, so that existing models and metrics are not reused.

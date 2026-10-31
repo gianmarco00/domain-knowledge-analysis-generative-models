@@ -1,16 +1,16 @@
 base_config: config/lora_vae_ellipsis.yaml
 
 ablation:
-  output_dir: ablations/vae_ellipsis_rotated_ellipsis_output_gram
+  output_dir: ablations/vae_ellipsis_rotated_ellipsis_output_gram_2
   parallel_models: 2
   source_label: Horizontal ellipses
   target_label: Rotated horizontal ellipses
 
   regularizer_mode: output_gram
   seeds: [42]
-  eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0]
-  m_values: [5, 10, 20]
-  s_values: [0.1, 0.5, 0.75]
+  eta_values: [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0]
+  m_values: [5, 10, 15, 20]
+  s_values: [0.1, 0.5, 0.75, 0.95]
   extra_runs:
     - {seed: 42, eta: 1.0, mode: source_loss}
   # Set best_model to {eta: 1000.0, m: 10, s: 0.1} to override automatic selection.
