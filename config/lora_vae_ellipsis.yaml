@@ -84,6 +84,35 @@ lora:
     train: true
     train_split: 0.8
     shape: [1, 28, 28]
-  regularizer: Null
+  regularizer:
+    mode: output_gram
+    response_weight: 1.0
+    decoder_weight: 1.0
+    decoder_seed: 0
+    num_anchor_points: 300
+    calibration_batch_size: 100
+    transformation_strength: 0.5
+    eta: 10000.0
+    transformations:
+      - {name: horizontal_translation, intensity: 2}
+      - {name: vertical_translation, intensity: 2}
+      - {name: isotropic_scale, intensity: 1.10}
+      - {name: aspect_ratio_deformation, intensity: 1.10}
+      - {name: diagonal_shear, intensity: 0.12}
+      - {name: vertical_shear, intensity: 0.12}
+      - {name: stroke_thickness, intensity: 0.5}
+      - {name: gaussian_blur, intensity: 0.7}
+      - {name: rotation, intensity: 15.0}
+      - {name: horizontal_wave, intensity: 2.0}
+      - {name: vertical_wave, intensity: 2.0}
+      - {name: perspective, intensity: 0.2}
+      - {name: vertical_perspective, intensity: 0.2}
+      - {name: swirl, intensity: 0.5}
+      - {name: radial_bulge, intensity: 0.5}
+      - {name: vignette, intensity: 0.5}
+      - {name: contrast, intensity: 1.2}
+      - {name: gamma_correction, intensity: 1.2}
+      - {name: binarization, intensity: 0.5}
+      - {name: sharpen, intensity: 0.5}
 
 seed: 42
