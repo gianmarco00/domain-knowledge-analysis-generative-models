@@ -1,0 +1,95 @@
+target_gain_fraction: 0.99
+ordinary_target_gain: 0.01697706239918868
+required_target_gain: 0.016807291775196794
+max_fid_increase_fraction: 0.12
+max_fid_by_seed:
+  '42': 22.77090728759766
+num_fid_eligible_models: 14
+best_regularized_target_gain: 0.0170034436583519
+best_regularized_target_fraction: 1.001553935453785
+num_eligible_models: 11
+manual_best_model: null
+automatic_best_overall_model_id: 575d196ab5
+qualitative_selection: best_overall
+models:
+  best_target_gain:
+    model_id: 126f63f4e8
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_output_gram_unnormalized/models/output_gram_seed_42_eta_10_M_5_s_0.5_126f63f4e8
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_output_gram_unnormalized/models/output_gram_seed_42_eta_10_M_5_s_0.5_126f63f4e8/config.yaml
+    seed: 42
+    eta: 10.0
+    mode: output_gram
+    m: 5
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear
+    extra_run: false
+    validation_base_target_mse: 0.02432569169998169
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.007322248041629792
+    validation_adapted_source_mse: 0.0280223051905632
+    validation_target_gain: 0.0170034436583519
+    validation_source_degradation: 0.02019400187333425
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586436450482
+    test_adapted_target_mse: 0.0072560675978660585
+    test_adapted_source_mse: 0.02744218788743019
+    test_target_gain: 0.01748713491261005
+    test_source_degradation: 0.019497601450979708
+    test_target_fid: 20.196239471435547
+    fid_seed: 123
+    checkpoint_hash: e4819a9f9e6fc6f54725dbd641a1ceeb0e5ebf20a601535e34416a21e415529c
+    fid_key: 191474ee637f42b79e19483c1f3188f70876116369292e64b29caf41c4a518ff
+  best_source_degradation:
+    model_id: '6706476478'
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_output_gram_unnormalized/models/output_gram_seed_42_eta_1000_M_20_s_0.5_6706476478
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_output_gram_unnormalized/models/output_gram_seed_42_eta_1000_M_20_s_0.5_6706476478/config.yaml
+    seed: 42
+    eta: 1000.0
+    mode: output_gram
+    m: 20
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+contrast+rotation+gamma_correction+binarization+horizontal_wave+vertical_wave+perspective+vertical_perspective+swirl+radial_bulge+sharpen+vignette
+    extra_run: false
+    validation_base_target_mse: 0.024325691719849905
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.0076955157319704695
+    validation_adapted_source_mse: 0.019742932240168255
+    validation_target_gain: 0.016630175987879435
+    validation_source_degradation: 0.011914628922939301
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586418569087
+    test_adapted_target_mse: 0.0076162970639765265
+    test_adapted_source_mse: 0.019342565184831618
+    test_target_gain: 0.017126905446499585
+    test_source_degradation: 0.01139797876626253
+    test_target_fid: 21.453264236450195
+    fid_seed: 123
+    checkpoint_hash: fe663c5d6ee47300c2fa79c394805fd7d0f4658cc7b182bdd7e7dda80b324947
+    fid_key: 191474ee637f42b79e19483c1f3188f70876116369292e64b29caf41c4a518ff
+  best_overall:
+    model_id: 575d196ab5
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_output_gram_unnormalized/models/output_gram_seed_42_eta_100_M_20_s_0.5_575d196ab5
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_output_gram_unnormalized/models/output_gram_seed_42_eta_100_M_20_s_0.5_575d196ab5/config.yaml
+    seed: 42
+    eta: 100.0
+    mode: output_gram
+    m: 20
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+contrast+rotation+gamma_correction+binarization+horizontal_wave+vertical_wave+perspective+vertical_perspective+swirl+radial_bulge+sharpen+vignette
+    extra_run: false
+    validation_base_target_mse: 0.024325691719849905
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.007368847285707792
+    validation_adapted_source_mse: 0.023794790585835775
+    validation_target_gain: 0.016956844434142113
+    validation_source_degradation: 0.015966487268606822
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586424529552
+    test_adapted_target_mse: 0.007315082916617394
+    test_adapted_source_mse: 0.023229529321193695
+    test_target_gain: 0.017428119593858718
+    test_source_degradation: 0.015284942896664143
+    test_target_fid: 20.3184757232666
+    fid_seed: 123
+    checkpoint_hash: 5a11b39718101c1935718619796055c96f4266ce4de06a61fd396282373bf76f
+    fid_key: 191474ee637f42b79e19483c1f3188f70876116369292e64b29caf41c4a518ff

@@ -1,0 +1,55 @@
+target_gain_fraction: 0.99
+ordinary_target_gain: 0.017006736889481545
+required_target_gain: 0.01683666952058673
+best_regularized_target_gain: 0.016477028956015907
+best_regularized_target_fraction: 0.9688530529455502
+num_eligible_models: 0
+qualitative_selection: best_target_gain
+models:
+  best_target_gain:
+    model_id: 856290f9eb
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_response/models/encoder_response_seed_42_eta_10_M_5_s_0.5_856290f9eb
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_response/models/encoder_response_seed_42_eta_10_M_5_s_0.5_856290f9eb/config.yaml
+    seed: 42
+    eta: 10.0
+    mode: encoder_response
+    m: 5
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear
+    extra_run: false
+    validation_base_target_mse: 0.02432569169998169
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.007848662743965784
+    validation_adapted_source_mse: 0.0368773912191391
+    validation_target_gain: 0.016477028956015907
+    validation_source_degradation: 0.029049087901910145
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586412608624
+    test_adapted_target_mse: 0.0077471416041254995
+    test_adapted_source_mse: 0.03675735917687416
+    test_target_gain: 0.016996060906350613
+    test_source_degradation: 0.028812772764265533
+  best_source_degradation:
+    model_id: 2e0f913989
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_response/models/encoder_response_seed_42_eta_100000_M_10_s_0.1_2e0f913989
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_response/models/encoder_response_seed_42_eta_100000_M_10_s_0.1_2e0f913989/config.yaml
+    seed: 42
+    eta: 100000.0
+    mode: encoder_response
+    m: 10
+    s: 0.1
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+contrast+rotation
+    extra_run: false
+    validation_base_target_mse: 0.02432569169998169
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.012253716419140498
+    validation_adapted_source_mse: 0.008605606079101562
+    validation_target_gain: 0.012071975280841193
+    validation_source_degradation: 0.000777302761872609
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586436450482
+    test_adapted_target_mse: 0.012107557967305184
+    test_adapted_source_mse: 0.008682744387537241
+    test_target_gain: 0.012635644543170928
+    test_source_degradation: 0.0007381579510867594
+  best_overall: null

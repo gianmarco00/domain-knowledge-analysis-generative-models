@@ -14,6 +14,11 @@ ablation:
   extra_runs:
     - {seed: 42, eta: 1.0, mode: source_loss}
   # Additional combinations for a close-up comparison with ordinary LoRA.
+  local_sweep:
+    eta_values: [900, 1000, 1100]
+    m_values: [3, 5, 7]
+    s_values: [0.75, 0.95]
+
   # Set best_model to {eta: 1000.0, m: 10, s: 0.1} to override automatic selection.
   # Add seed, mode, subset or model_id if these hyperparameters match multiple runs.
   best_model: null

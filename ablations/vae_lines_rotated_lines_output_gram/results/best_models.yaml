@@ -1,0 +1,83 @@
+target_gain_fraction: 0.99
+ordinary_target_gain: 0.03691763097047805
+required_target_gain: 0.03654845466077327
+best_regularized_target_gain: 0.03699345630407333
+best_regularized_target_fraction: 1.0020539057247717
+num_eligible_models: 7
+qualitative_selection: best_overall
+models:
+  best_target_gain:
+    model_id: 51c514e59d
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_lines_rotated_lines_output_gram/models/output_gram_seed_42_eta_100_M_16_s_0.5_51c514e59d
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_lines_rotated_lines_output_gram/models/output_gram_seed_42_eta_100_M_16_s_0.5_51c514e59d/config.yaml
+    seed: 42
+    eta: 100.0
+    mode: output_gram
+    m: 16
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+rotation+horizontal_wave+vertical_wave+perspective+vertical_perspective+swirl+radial_bulge+vignette
+    extra_run: false
+    validation_base_target_mse: 0.04188355827331543
+    validation_base_source_mse: 0.0036005078256130217
+    validation_adapted_target_mse: 0.004890101969242096
+    validation_adapted_source_mse: 0.04484813117980957
+    validation_target_gain: 0.03699345630407333
+    validation_source_degradation: 0.041247623354196544
+    test_base_target_mse: 0.04107271099090576
+    test_base_source_mse: 0.003663922369480133
+    test_adapted_target_mse: 0.005108508050441742
+    test_adapted_source_mse: 0.04384204053878784
+    test_target_gain: 0.03596420294046401
+    test_source_degradation: 0.040178118169307706
+    test_target_fid: 114.65501570290239
+    fid_seed: 123
+  best_source_degradation:
+    model_id: 6aaefb3a73
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_lines_rotated_lines_output_gram/models/output_gram_seed_42_eta_1e+07_M_5_s_0.01_6aaefb3a73
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_lines_rotated_lines_output_gram/models/output_gram_seed_42_eta_1e+07_M_5_s_0.01_6aaefb3a73/config.yaml
+    seed: 42
+    eta: 10000000.0
+    mode: output_gram
+    m: 5
+    s: 0.01
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear
+    extra_run: false
+    validation_base_target_mse: 0.04188355827331543
+    validation_base_source_mse: 0.0036005078256130217
+    validation_adapted_target_mse: 0.041632761001586915
+    validation_adapted_source_mse: 0.003714802145957947
+    validation_target_gain: 0.00025079727172851174
+    validation_source_degradation: 0.0001142943203449251
+    test_base_target_mse: 0.04107271099090576
+    test_base_source_mse: 0.003663922369480133
+    test_adapted_target_mse: 0.040840965270996094
+    test_adapted_source_mse: 0.0037950588464736937
+    test_target_gain: 0.00023174571990966508
+    test_source_degradation: 0.00013113647699356055
+    test_target_fid: 144.7882731838768
+    fid_seed: 123
+  best_overall:
+    model_id: 9a2a980824
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_lines_rotated_lines_output_gram/models/output_gram_seed_42_eta_100_M_16_s_0.01_9a2a980824
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_lines_rotated_lines_output_gram/models/output_gram_seed_42_eta_100_M_16_s_0.01_9a2a980824/config.yaml
+    seed: 42
+    eta: 100.0
+    mode: output_gram
+    m: 16
+    s: 0.01
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+rotation+horizontal_wave+vertical_wave+perspective+vertical_perspective+swirl+radial_bulge+vignette
+    extra_run: false
+    validation_base_target_mse: 0.04188355827331543
+    validation_base_source_mse: 0.0036005078256130217
+    validation_adapted_target_mse: 0.004907313942909241
+    validation_adapted_source_mse: 0.04018200874328613
+    validation_target_gain: 0.03697624433040619
+    validation_source_degradation: 0.03658150091767311
+    test_base_target_mse: 0.04107271099090576
+    test_base_source_mse: 0.003663922369480133
+    test_adapted_target_mse: 0.0051214958429336545
+    test_adapted_source_mse: 0.0395479474067688
+    test_target_gain: 0.0359512151479721
+    test_source_degradation: 0.035884025037288665
+    test_target_fid: 123.34960781841482
+    fid_seed: 123

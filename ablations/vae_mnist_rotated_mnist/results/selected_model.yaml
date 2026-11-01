@@ -1,0 +1,5 @@
+mode: semantic_perturbations
+m: 10
+eta: 10000.0
+validation_target_gain: 0.01684513811270396
+validation_source_degradation: 0.014948634366194407

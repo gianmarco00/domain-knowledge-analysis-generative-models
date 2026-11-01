@@ -1,0 +1,55 @@
+target_gain_fraction: 0.99
+ordinary_target_gain: 0.016964422057072322
+required_target_gain: 0.016794777836501597
+best_regularized_target_gain: 0.016669694299499195
+best_regularized_target_fraction: 0.9826267139203686
+num_eligible_models: 0
+qualitative_selection: best_target_gain
+models:
+  best_target_gain:
+    model_id: 76fa8c6dd8
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_gram/models/encoder_gram_seed_42_eta_10_M_5_s_0.5_76fa8c6dd8
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_gram/models/encoder_gram_seed_42_eta_10_M_5_s_0.5_76fa8c6dd8/config.yaml
+    seed: 42
+    eta: 10.0
+    mode: encoder_gram
+    m: 5
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear
+    extra_run: false
+    validation_base_target_mse: 0.02432569169998169
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.007655997400482496
+    validation_adapted_source_mse: 0.05092325286070506
+    validation_target_gain: 0.016669694299499195
+    validation_source_degradation: 0.043094949543476105
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586424529552
+    test_adapted_target_mse: 0.007572415536642074
+    test_adapted_source_mse: 0.050665137732028964
+    test_target_gain: 0.017170786973834038
+    test_source_degradation: 0.04272055130749941
+  best_source_degradation:
+    model_id: 5527c8426e
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_gram/models/encoder_gram_seed_42_eta_100000_M_20_s_0.5_5527c8426e
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_rotated_mnist_encoder_gram/models/encoder_gram_seed_42_eta_100000_M_20_s_0.5_5527c8426e/config.yaml
+    seed: 42
+    eta: 100000.0
+    mode: encoder_gram
+    m: 20
+    s: 0.5
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+contrast+rotation+gamma_correction+binarization+horizontal_wave+vertical_wave+perspective+vertical_perspective+swirl+radial_bulge+sharpen+vignette
+    extra_run: false
+    validation_base_target_mse: 0.02432569169998169
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.012140685051679612
+    validation_adapted_source_mse: 0.00859971410036087
+    validation_target_gain: 0.012185006648302079
+    validation_source_degradation: 0.0007714107831319171
+    test_base_target_mse: 0.02474320251047611
+    test_base_source_mse: 0.007944586424529552
+    test_adapted_target_mse: 0.011996188001334666
+    test_adapted_source_mse: 0.008669552256166935
+    test_target_gain: 0.012747014509141445
+    test_source_degradation: 0.0007249658316373832
+  best_overall: null
