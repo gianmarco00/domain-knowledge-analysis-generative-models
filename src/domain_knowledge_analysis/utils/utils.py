@@ -56,6 +56,10 @@ def build_run_name(config):
 
                 regularizer_config = config["lora"]["regularizer"]
                 eta = regularizer_config["eta"]
+                if regularizer_config.get("mode") == "target_geometry":
+                    view = regularizer_config.get("view", "full")
+                    batch_size = regularizer_config.get("geometry_batch_size", 64)
+                    return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_target_geometry_{view}_eta_{eta}_B_{batch_size}_rank_{rank}_alpha_{alpha}"
                 num_anchor_points = regularizer_config["num_anchor_points"]
                 k = len(regularizer_config["transformations"])
                 target_input_rms = regularizer_config.get("target_input_rms")

@@ -1,5 +1,14 @@
 # Domain Knowledge Analysis for Generative Models
 
+## Target geometry regularizer
+
+The new, separate `target_geometry` regularizer uses real target batches and a
+frozen source decoder with a measured source tolerance. See
+[the objective, parameter guide and run commands](docs/target_geometry.md).
+MNIST and ellipse base LoRA configs and ablation configs use the suffix
+`_target_geometry.yaml`; each sweep includes ordinary LoRA, both one-view
+controls and three seeds. Existing regularizers and configs are unchanged.
+
 ## LoRA Gram regularizer
 
 In a LoRA YAML configuration, set the output Gram regularizer's trace normalization as follows:

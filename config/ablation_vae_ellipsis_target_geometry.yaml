@@ -1,0 +1,36 @@
+# 63 runs: 3 seeds x (1 ordinary LoRA + 18 full-view grid points + 2 one-view controls).
+# Full grid: 3 eta x 2 geometry batch sizes x 3 dual learning rates per seed.
+# B is shared by source calibration, target training geometry and geometry validation.
+base_config: config/lora_vae_ellipsis_target_geometry.yaml
+ablation:
+  regularizer_mode: target_geometry
+  output_dir: ablations/vae_ellipsis_target_geometry
+  parallel_models: 2
+  seeds:
+  - 42
+  - 43
+  - 44
+  eta_values:
+  - 10.0
+  - 100.0
+  - 1000.0
+  geometry_batch_sizes:
+  - 64
+  - 128
+  dual_learning_rates:
+  - 0.001
+  - 0.01
+  - 0.1
+  controls:
+  - view: target_only
+    eta: 100.0
+    geometry_batch_size: 64
+  - view: source_only
+    eta: 100.0
+    geometry_batch_size: 64
+  visual_seed: 123
+  fid_seed: 123
+  fid_batch_size: 512
+  num_qualitative_images: 6
+  source_label: Horizontal ellipses source
+  target_label: "90\xB0 rotated ellipses target"

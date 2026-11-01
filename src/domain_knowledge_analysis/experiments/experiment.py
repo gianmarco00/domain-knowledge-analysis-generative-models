@@ -133,7 +133,15 @@ class Experiment():
 
         loss = utils.create_loss(self.source_config)
 
-        if self.config["lora"]["regularizer"] is not None:
+        trainer_class, trainer_options = Trainer, {}
+        regularizer_config = self.config["lora"]["regularizer"]
+        if regularizer_config is not None and regularizer_config.get("mode") == "target_geometry":
+            from .target_geometry import create_target_geometry_regularizer, TargetGeometryTrainer
+
+            regularizer, trainer_options = create_target_geometry_regularizer(self)
+            regularizer_eta = regularizer_config["eta"]
+            trainer_class = TargetGeometryTrainer
+        elif regularizer_config is not None:
             anchor_points = utils.select_anchor_points(self.config, self.source_dataset_name, self.device)
             regularizer_config = self.config["lora"]["regularizer"]
             regularizer_mode = regularizer_config.get("mode", "output_gram")
@@ -152,7 +160,7 @@ class Experiment():
         
         self.print_tensorboard_instructions(self.log_dir)
 
-        trainer = Trainer(
+        trainer = trainer_class(
             model=self.model,
             train_dataloader=train_dataloader,
             validate_dataloader=validation_dataloader,
@@ -169,6 +177,7 @@ class Experiment():
             progress_position=self.progress_position,
             progress_description=self.progress_description,
             progress_stream=self.progress_stream,
+            **trainer_options,
         )
 
         trainer.fit()

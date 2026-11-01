@@ -11,7 +11,13 @@ def main():
     args = parser.parse_args()
 
     try:
-        ablation = Ablation(args.config)
+        from domain_knowledge_analysis.utils import load_config
+
+        if load_config(args.config)["ablation"].get("regularizer_mode") == "target_geometry":
+            from domain_knowledge_analysis.experiments.target_geometry_ablation import TargetGeometryAblation
+            ablation = TargetGeometryAblation(args.config)
+        else:
+            ablation = Ablation(args.config)
         ablation.run()
     except KeyboardInterrupt:
         print("\nAblation stopped. Completed model checkpoints are preserved.")

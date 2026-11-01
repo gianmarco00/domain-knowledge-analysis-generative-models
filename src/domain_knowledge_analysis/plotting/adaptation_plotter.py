@@ -85,6 +85,13 @@ class AdaptationPlotter:
 
         if regularizer_config is None:
             summary = "Regularizer: none"
+        elif regularizer_config.get("mode") == "target_geometry":
+            summary = (
+                f"Target geometry  |  view: {regularizer_config.get('view', 'full')}"
+                f"  |  eta: {float(regularizer_config['eta']):g}"
+                f"  |  geometry batch: {regularizer_config.get('geometry_batch_size', 64)}"
+                f"  |  dual step: {float(regularizer_config.get('dual_learning_rate', 0.01)):g}"
+            )
         else:
             transformations = []
 
