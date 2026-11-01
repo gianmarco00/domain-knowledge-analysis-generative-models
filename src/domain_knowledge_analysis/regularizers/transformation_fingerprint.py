@@ -6,9 +6,10 @@ from domain_knowledge_analysis.utils.utils import INPUT_SCALE_FLOOR, RMS_ABSOLUT
 
 
 class TFRegularizer(torch.nn.Module):
-    VALID_MODES = {"output_gram", "encoder_response", "encoder_gram", "source_loss"}
+    VALID_MODES = {"output_gram", "joint_gram", "encoder_response", "encoder_gram", "source_loss"}
+    JOINT_ENERGY_FLOOR = 1e-12
 
-    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0, loss=None, trace_normalization=True):
+    def __init__(self, model, lora_manager, transformations, anchor_points, anchor_batch_size=10, calibration_batch_size=100, target_input_rms=None, target_input_scales=None, mode="output_gram", response_weight=1.0, decoder_weight=0.0, decoder_seed=0, loss=None, trace_normalization=True, fingerprint_map="reconstruction"):
         super().__init__()
 
         if mode not in self.VALID_MODES:
@@ -19,10 +20,17 @@ class TFRegularizer(torch.nn.Module):
             raise ValueError("Regularizer decoder_weight must be finite and nonnegative.")
         if not isinstance(trace_normalization, bool):
             raise ValueError("Regularizer trace_normalization must be a boolean.")
+        if fingerprint_map not in {"reconstruction", "fixed_decoder"}:
+            raise ValueError("Regularizer fingerprint_map must be reconstruction or fixed_decoder.")
+        if fingerprint_map != "reconstruction" and mode not in {"output_gram", "joint_gram"}:
+            raise ValueError("fixed_decoder fingerprint_map requires output_gram or joint_gram mode.")
+        if not isinstance(anchor_batch_size, int) or isinstance(anchor_batch_size, bool) or anchor_batch_size < 1:
+            raise ValueError("Regularizer anchor_batch_size must be a positive integer.")
 
         self.model = model
         self.lora_manager = lora_manager
         self.mode = mode
+        self.fingerprint_map = fingerprint_map
         self.trace_normalization = trace_normalization
         self.response_weight = float(response_weight)
         self.decoder_weight = float(decoder_weight)
@@ -31,6 +39,10 @@ class TFRegularizer(torch.nn.Module):
         self.num_anchor_points = len(self.x)
         self.anchor_batch_size = anchor_batch_size
         self.calibration_batch_size = calibration_batch_size
+        if self.mode == "joint_gram":
+            self.anchor_batch_size = min(anchor_batch_size, self.num_anchor_points)
+            if self.anchor_batch_size < 2:
+                raise ValueError("joint_gram requires at least two anchors per batch.")
 
         if self.mode == "source_loss":
             if loss is None:
@@ -48,6 +60,12 @@ class TFRegularizer(torch.nn.Module):
 
         self.shuffle_anchor_indices()
         self.calibrate()
+        if self.mode == "joint_gram":
+            # Check once that even the lowest-energy possible batch is valid.
+            energies = self.source_joint_responses.square().sum(dim=(1, 2))
+            minimum_batch_energy = energies.topk(self.anchor_batch_size, largest=False).values.sum()
+            if not torch.isfinite(energies).all() or minimum_batch_energy <= self.JOINT_ENERGY_FLOOR:
+                raise ValueError("joint_gram requires finite, nonzero source response energy for every anchor batch.")
 
     def calibrate(self):
         self.calibrate_input_scale()
@@ -57,46 +75,65 @@ class TFRegularizer(torch.nn.Module):
         self.model.eval()
         self.lora_manager.disable_adapters()
 
-        with torch.no_grad():
-            if self.mode == "output_gram":
-                self.source_gram_matrices = self.gram_matrix_batched(self.calibration_batch_size)
-            else:
-                source_encoder_outputs = []
-                source_transformation_geometries = []
-                source_latents = []
-                source_decoder_outputs = []
-
-                if self.decoder_weight > 0:
-                    latent_dim = self.model.encoder_params["latent_dim"]
-                    generator = torch.Generator(device="cpu")
-                    generator.manual_seed(self.decoder_seed)
-                    posterior_noise = torch.randn(self.num_anchor_points, latent_dim, generator=generator, dtype=self.x.dtype).to(self.x.device)
-                    prior_latents = torch.randn(self.num_anchor_points, latent_dim, generator=generator, dtype=self.x.dtype).to(self.x.device)
-
-                for start in range(0, self.num_anchor_points, self.calibration_batch_size):
-                    end = min(start + self.calibration_batch_size, self.num_anchor_points)
-                    anchor_indices = torch.arange(start, end, device=self.x.device)
-                    encoder_output, response = self.model_response(anchor_indices, return_original=True)
-                    source_encoder_outputs.append(encoder_output)
-                    source_transformation_geometries.append(self.transformation_geometry(response))
+        try:
+            with torch.no_grad():
+                if self.fingerprint_map == "fixed_decoder":
+                    self.calibrate_fixed_decoder_probes()
+                if self.mode == "output_gram":
+                    self.source_gram_matrices = self.gram_matrix_batched(self.calibration_batch_size)
+                elif self.mode == "joint_gram":
+                    responses = []
+                    for start in range(0, self.num_anchor_points, self.calibration_batch_size):
+                        indices = torch.arange(start, min(start + self.calibration_batch_size, self.num_anchor_points), device=self.x.device)
+                        responses.append(self.model_response(indices) / self.input_scales.view(1, -1, 1))
+                    self.source_joint_responses = torch.cat(responses)
+                else:
+                    source_encoder_outputs = []
+                    source_transformation_geometries = []
+                    source_latents = []
+                    source_decoder_outputs = []
 
                     if self.decoder_weight > 0:
-                        mean, std = encoder_output.chunk(2, dim=-1)
-                        latents = torch.stack([mean, mean + std * posterior_noise[start:end], prior_latents[start:end]], dim=1)
-                        source_latents.append(latents)
-                        source_decoder_outputs.append(self.decoder_output(latents.flatten(0, 1)).reshape(end - start, 3, -1))
+                        latent_dim = self.model.encoder_params["latent_dim"]
+                        generator = torch.Generator(device="cpu")
+                        generator.manual_seed(self.decoder_seed)
+                        posterior_noise = torch.randn(self.num_anchor_points, latent_dim, generator=generator, dtype=self.x.dtype).to(self.x.device)
+                        prior_latents = torch.randn(self.num_anchor_points, latent_dim, generator=generator, dtype=self.x.dtype).to(self.x.device)
 
-                self.source_encoder_outputs = torch.cat(source_encoder_outputs)
-                self.source_transformation_geometries = torch.cat(source_transformation_geometries)
+                    for start in range(0, self.num_anchor_points, self.calibration_batch_size):
+                        end = min(start + self.calibration_batch_size, self.num_anchor_points)
+                        anchor_indices = torch.arange(start, end, device=self.x.device)
+                        encoder_output, response = self.model_response(anchor_indices, return_original=True)
+                        source_encoder_outputs.append(encoder_output)
+                        source_transformation_geometries.append(self.transformation_geometry(response))
 
-                if self.decoder_weight > 0:
-                    self.source_latents = torch.cat(source_latents)
-                    self.source_decoder_outputs = torch.cat(source_decoder_outputs)
+                        if self.decoder_weight > 0:
+                            mean, std = encoder_output.chunk(2, dim=-1)
+                            latents = torch.stack([mean, mean + std * posterior_noise[start:end], prior_latents[start:end]], dim=1)
+                            source_latents.append(latents)
+                            source_decoder_outputs.append(self.decoder_output(latents.flatten(0, 1)).reshape(end - start, 3, -1))
 
-        if adapters_were_enabled:
-            self.lora_manager.enable_adapters()
+                    self.source_encoder_outputs = torch.cat(source_encoder_outputs)
+                    self.source_transformation_geometries = torch.cat(source_transformation_geometries)
 
-        self.model.train(was_training)
+                    if self.decoder_weight > 0:
+                        self.source_latents = torch.cat(source_latents)
+                        self.source_decoder_outputs = torch.cat(source_decoder_outputs)
+
+        finally:
+            if adapters_were_enabled:
+                self.lora_manager.enable_adapters()
+            self.model.train(was_training)
+
+    def calibrate_fixed_decoder_probes(self):
+        probes = []
+        for start in range(0, self.num_anchor_points, self.calibration_batch_size):
+            x = self.x[start:start + self.calibration_batch_size]
+            transformed = self.transformed_x[start:start + self.calibration_batch_size]
+            images = torch.cat((x.unsqueeze(1), transformed), dim=1)
+            means, _ = self.model.encoder(images.flatten(0, 1))
+            probes.append(means.reshape(len(x), self.num_transformations + 1, -1))
+        self.fixed_decoder_probes = torch.cat(probes)
 
     def calibrate_input_scale(self):
         # This accumulates the numerator and denominator of input_delta.square().mean(dim=(0, 2)).
@@ -133,6 +170,9 @@ class TFRegularizer(torch.nn.Module):
         self.anchor_position = 0
 
     def sample_anchor_indices(self):
+        if self.mode == "joint_gram" and self.anchor_position + self.anchor_batch_size > self.num_anchor_points:
+            # Discard the short remainder to keep the joint loss batch size fixed.
+            self.shuffle_anchor_indices()
         start = self.anchor_position
         end = min(start + self.anchor_batch_size, self.num_anchor_points)
 
@@ -151,7 +191,7 @@ class TFRegularizer(torch.nn.Module):
         return transformed_x
 
     def model_representation(self, x):
-        if self.mode == "output_gram":
+        if self.mode in {"output_gram", "joint_gram"}:
             return self.model.deterministic_forward(x)
 
         mean, log_variance = self.model.encoder(x)
@@ -162,6 +202,18 @@ class TFRegularizer(torch.nn.Module):
         return self.model.decoder_distribution(logits, self.model.decoder_distribution_name).flatten(start_dim=1)
 
     def model_response(self, anchor_indices=None, return_original=False):
+        if self.fingerprint_map == "fixed_decoder":
+            probes = self.fixed_decoder_probes if anchor_indices is None else self.fixed_decoder_probes[anchor_indices]
+            was_training = self.model.training
+            self.model.eval()
+            try:
+                outputs = self.decoder_output(probes.flatten(0, 1)).reshape(len(probes), self.num_transformations + 1, -1)
+            finally:
+                self.model.train(was_training)
+            original = outputs[:, :1]
+            response = outputs[:, 1:] - original
+            return (original.squeeze(1), response) if return_original else response
+
         x = self.x if anchor_indices is None else self.x[anchor_indices]
         transformed_x = self.transformed_x if anchor_indices is None else self.transformed_x[anchor_indices]
 
@@ -180,6 +232,14 @@ class TFRegularizer(torch.nn.Module):
             return original_output.squeeze(1), response
 
         return response
+
+    @classmethod
+    def normalized_joint_gram(cls, scaled_responses):
+        # Rows are (anchor, transformation); columns are output coordinates.
+        rows = scaled_responses.flatten(0, 1)
+        gram = rows @ rows.transpose(0, 1)
+        energy = gram.diagonal().sum()
+        return gram / energy.clamp_min(cls.JOINT_ENERGY_FLOOR)
 
     def gram_matrix(self, anchor_indices=None, response_vector=None):
         response_vector = self.model_response(anchor_indices) if response_vector is None else response_vector
@@ -221,6 +281,13 @@ class TFRegularizer(torch.nn.Module):
             current_gram_matrices = self.gram_matrix(anchor_indices)
             source_gram_matrices = self.source_gram_matrices[anchor_indices]
             return torch.square(current_gram_matrices - source_gram_matrices).mean()
+
+        if self.mode == "joint_gram":
+            current = self.model_response(anchor_indices) / self.input_scales.view(1, -1, 1)
+            source = self.source_joint_responses[anchor_indices]
+            current_gram = self.normalized_joint_gram(current)
+            source_gram = self.normalized_joint_gram(source)
+            return torch.square(current_gram - source_gram).sum()
 
         was_training = self.model.training
         self.model.eval()

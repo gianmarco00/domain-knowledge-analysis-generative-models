@@ -140,7 +140,7 @@ class Experiment():
             transformations = None if regularizer_mode == "source_loss" else utils.create_regularizer_transformations(self.config, self.device, anchor_points)
             resolved_transformations = regularizer_config.get("calibration", {}).get("transformations", [])
             target_input_scales = [transformation["target_input_rms"] for transformation in resolved_transformations] or None
-            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points, calibration_batch_size=regularizer_config.get("calibration_batch_size", 100), target_input_scales=target_input_scales, mode=regularizer_mode, response_weight=regularizer_config.get("response_weight", 1.0), decoder_weight=regularizer_config.get("decoder_weight", 0.0), decoder_seed=regularizer_config.get("decoder_seed", 0), loss=loss, trace_normalization=regularizer_config.get("trace_normalization", True))
+            regularizer = TFRegularizer(self.model, self.lora_manager, transformations, anchor_points, anchor_batch_size=regularizer_config.get("anchor_batch_size", 10), calibration_batch_size=regularizer_config.get("calibration_batch_size", 100), target_input_scales=target_input_scales, mode=regularizer_mode, response_weight=regularizer_config.get("response_weight", 1.0), decoder_weight=regularizer_config.get("decoder_weight", 0.0), decoder_seed=regularizer_config.get("decoder_seed", 0), loss=loss, trace_normalization=regularizer_config.get("trace_normalization", True), fingerprint_map=regularizer_config.get("fingerprint_map", "reconstruction"))
             regularizer_eta = regularizer_config["eta"]
 
             for transformation in resolved_transformations:

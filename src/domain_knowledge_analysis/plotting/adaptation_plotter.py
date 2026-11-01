@@ -94,8 +94,12 @@ class AdaptationPlotter:
             mode = regularizer_config.get("mode", "output_gram")
             mode_summary = f"mode: {mode}"
 
-            if mode != "output_gram":
+            if mode in {"encoder_response", "encoder_gram"}:
                 mode_summary += f"  |  response weight: {float(regularizer_config.get('response_weight', 1.0)):g}  |  decoder weight: {float(regularizer_config.get('decoder_weight', 0.0)):g}"
+            elif mode in {"output_gram", "joint_gram"}:
+                mode_summary += f"  |  map: {regularizer_config.get('fingerprint_map', 'reconstruction')}"
+                if mode == "joint_gram":
+                    mode_summary += f"  |  anchor batch: {int(regularizer_config.get('anchor_batch_size', 10))}"
 
             midpoint = (len(transformations) + 1) // 2
             first_line = f"TF regularizer  |  {mode_summary}  |  {'; '.join(transformations[:midpoint])}"

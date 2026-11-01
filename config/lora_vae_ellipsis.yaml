@@ -85,7 +85,9 @@ lora:
     train_split: 0.8
     shape: [1, 28, 28]
   regularizer:
-    mode: output_gram
+    mode: output_gram # Use joint_gram for a batch-wide fingerprint.
+    # fingerprint_map: reconstruction # Or fixed_decoder; applies to both Gram modes.
+    # anchor_batch_size: 10 # Joint batches always have this many anchors, if available.
     trace_normalization: true # Set false to retain Gram response magnitudes.
     response_weight: 1.0
     decoder_weight: 1.0

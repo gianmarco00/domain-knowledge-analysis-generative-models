@@ -67,8 +67,12 @@ def build_run_name(config):
                 if regularizer_mode == "output_gram" and regularizer_config.get("trace_normalization", True) is False:
                     mode_name += "_no_trace_norm"
 
-                if regularizer_mode != "output_gram":
+                if regularizer_mode in {"encoder_response", "encoder_gram", "source_loss"}:
                     mode_name += f"_RW_{float(regularizer_config.get('response_weight', 1.0)):g}_DW_{float(regularizer_config.get('decoder_weight', 0.0)):g}_DS_{int(regularizer_config.get('decoder_seed', 0))}"
+                if regularizer_mode in {"output_gram", "joint_gram"} and regularizer_config.get("fingerprint_map", "reconstruction") == "fixed_decoder":
+                    mode_name += "_fixed_decoder"
+                if regularizer_mode == "joint_gram":
+                    mode_name += f"_B_{regularizer_config.get('anchor_batch_size', 10)}"
 
                 return f"REG_{experiment_name}_finetuned_on_{finetuning_dataset}_{timestamp}_eta_{eta}_K_{k}_AP_{num_anchor_points}{rms_name}{strength_name}{mode_name}_TV_{TRANSFORMATION_IMPLEMENTATION_VERSION}_rank_{rank}_alpha_{alpha}"
             

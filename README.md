@@ -13,6 +13,26 @@ lora:
 
 The default is `true`, including when the option is absent. Setting it to `false` compares the source and adapted Gram matrices without dividing each matrix by its trace, so the loss also reflects the magnitude of the responses. The input RMS scaling and averaging over output dimensions still apply. This can change the loss scale, so `eta` may need retuning. The option applies only to `output_gram`; `encoder_gram` already uses Gram matrices without trace normalization.
 
+### Joint transformation fingerprint
+
+Use `joint_gram` to compare responses across anchors as well as transformations:
+
+```yaml
+lora:
+  regularizer:
+    mode: joint_gram
+    fingerprint_map: reconstruction  # or fixed_decoder
+    anchor_batch_size: 10
+    eta: 1000.0  # example only; tune for this loss
+    # Keep the existing num_anchor_points and transformations settings.
+```
+
+For a batch of B anchors and M transformations, each response is divided by its fixed, source-input RMS scale, then the B × M response vectors are stacked as rows of X. The loss is the **sum** of squared entries of `X Xᵀ / trace(X Xᵀ) - X₀ X₀ᵀ / trace(X₀ X₀ᵀ)`. The source responses are cached with adapters disabled. The normalization is shared by the entire batch, not per anchor, and is always enabled in this mode regardless of `trace_normalization`. A trace floor of `1e-12` avoids division by zero; source anchor batches with energy at or below that floor are rejected during calibration, so a collapsed adapted response cannot have zero loss against them. This summed loss has a different scale from the per-entry mean in `output_gram`; tune `eta` independently.
+
+`fingerprint_map: reconstruction` (the default) probes the full adapted encoder–decoder reconstruction map. `fixed_decoder` instead caches the source encoder's latent means for each original and transformed anchor, then evaluates both source and adapted decoders at those same fixed latent points. In that setting the penalty directly reaches the decoder, not the adapted encoder; it requires trainable decoder adapters to affect the LoRA update. It probes source-posterior locations and does not establish coverage of the full generation prior. The same `fingerprint_map` option also works with `output_gram`, enabling local-versus-joint comparisons on either map.
+
+Joint batches contain `min(anchor_batch_size, num_anchor_points)` distinct anchors and must contain at least two. The sampler reshuffles rather than using a shorter final batch. With B anchors, M transformations, and D output values, the cached source responses require O(NMD) storage and each joint Gram has (BM)² entries and costs O((BM)²D) arithmetic. Larger batches increase coverage but also this cost. The mode constrains observed responses; improved target quality and global behavior between probe locations require empirical evaluation.
+
 ## Ablation FID
 
 Run `python scripts/run_ablation.py` to train or reuse the ablation models and evaluate them. During training, the overall bar counts completed models (including reused checkpoints), and each worker has its own epoch bar. Detailed output is saved in each model directory as `training.log`. Ctrl+C stops the parallel workers. On a later run, models without both `best.pt` and the final `last.pt` are retrained from the source checkpoint; completed models are reused. The results include `test_target_fid` in `results/metrics.csv` and a plot in `figures/figure_9_target_fid.png`. Existing saved metrics are reused, and missing FID values are calculated from the saved checkpoints. The FID plot uses color for M and displays the selected model’s transformation strength s; ordinary LoRA and source-loss LoRA are shown separately.

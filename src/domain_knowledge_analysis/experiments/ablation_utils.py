@@ -46,6 +46,8 @@ def create_training_config(base_config, seed, eta, transformation_families, tran
     if regularizer_config is None:
         raise ValueError("The ablation base config must define lora.regularizer for regularized runs; it is currently null.")
     regularizer_config["eta"] = float(eta)
+    if regularizer_mode is not None and regularizer_mode not in {"output_gram", "joint_gram"}:
+        regularizer_config.pop("fingerprint_map", None)
 
     if regularizer_mode == "source_loss":
         regularizer_config["mode"] = regularizer_mode
