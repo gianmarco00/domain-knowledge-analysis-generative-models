@@ -92,12 +92,14 @@ def generate_model_runs(base_config, ablation_config, output_dir):
     semantic_transformations = ablation_config["semantic_transformations"]
     runs = {}
 
-    def add_run(seed, eta, subset, strength=0.0, mode=regularizer_mode, extra_run=False):
+    def add_run(seed, eta, subset, strength=0.0, mode=regularizer_mode, extra_run=False, local_sweep=False):
         is_regularized = float(eta) != 0
         config = create_training_config(base_config, seed, eta, subset, strength if subset else None, mode if is_regularized else None)
         model_id = training_config_id(config)
 
         if model_id in runs:
+            if local_sweep:
+                runs[model_id]["local_sweep"] = True
             return
 
         m = len(subset)
@@ -118,6 +120,7 @@ def generate_model_runs(base_config, ablation_config, output_dir):
             "s": float(strength) if subset else 0.0,
             "subset": transformation_name(subset),
             "extra_run": bool(extra_run),
+            "local_sweep": bool(local_sweep),
         }
 
     for seed in ablation_config["seeds"]:
@@ -139,6 +142,30 @@ def generate_model_runs(base_config, ablation_config, output_dir):
             raise ValueError("Every custom ablation run must define s.")
 
         add_run(extra_run["seed"], extra_run["eta"], subset, strength, mode, extra_run=True)
+
+    local_sweep = ablation_config.get("local_sweep")
+    if local_sweep is not None:
+        if not isinstance(local_sweep, dict):
+            raise ValueError("local_sweep must be a mapping with eta_values, m_values and s_values.")
+        for key in ("eta_values", "m_values", "s_values"):
+            if not isinstance(local_sweep.get(key), list) or not local_sweep[key]:
+                raise ValueError(f"local_sweep.{key} must be a non-empty list.")
+        for eta in local_sweep["eta_values"]:
+            if not math.isfinite(float(eta)) or float(eta) <= 0:
+                raise ValueError("local_sweep eta values must be finite and positive.")
+        for m in local_sweep["m_values"]:
+            if not math.isfinite(float(m)) or not float(m).is_integer():
+                raise ValueError("local_sweep M values must be integers.")
+            select_transformation_prefix(semantic_transformations, m)
+        for strength in local_sweep["s_values"]:
+            if not math.isfinite(float(strength)) or float(strength) < 0:
+                raise ValueError("local_sweep s values must be finite and nonnegative.")
+        for seed in ablation_config["seeds"]:
+            for eta in local_sweep["eta_values"]:
+                for m in local_sweep["m_values"]:
+                    subset = select_transformation_prefix(semantic_transformations, m)
+                    for strength in local_sweep["s_values"]:
+                        add_run(seed, eta, subset, strength, local_sweep=True)
 
     return list(runs.values())
 

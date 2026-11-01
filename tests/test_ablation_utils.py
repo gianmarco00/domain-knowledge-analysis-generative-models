@@ -56,9 +56,10 @@ def test_ablation_config_generates_the_grid_source_loss_and_one_baseline(tmp_pat
     source_loss_run = next(run for run in runs if run["mode"] == "source_loss")
     ordinary_runs = [run for run in runs if run["eta"] == 0]
 
-    assert len(regularized_runs) == 45
+    grid_size = len(config["seeds"]) * len(config["eta_values"]) * len(config["m_values"]) * len(config["s_values"])
+    assert len(regularized_runs) == grid_size
     assert len(ordinary_runs) == 1
-    assert len({run["model_id"] for run in runs}) == 47
+    assert len({run["model_id"] for run in runs}) == grid_size + 2
     assert {(run["eta"], run["m"], run["s"]) for run in regularized_runs} == {(eta, m, s) for eta in config["eta_values"] for m in config["m_values"] for s in config["s_values"]}
     assert all(run["mode"] == config["regularizer_mode"] for run in regularized_runs)
     assert all(run["config_path"].is_file() for run in runs)
@@ -256,3 +257,41 @@ def test_mnist_selection_matches_reported_m10_m20_metrics():
     assert summary["num_fid_eligible_models"] == 3
     assert summary["num_eligible_models"] == 2
     assert best["best_overall"]["model_id"] == "1fc9741ddb"
+
+
+def test_ellipse_local_sweep_reuses_overlapping_model_ids_and_configs(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    with open(root / "config" / "ablation_vae_ellipsis.yaml") as file:
+        config = yaml.safe_load(file)
+    with open(root / config["base_config"]) as file:
+        base = yaml.safe_load(file)
+    sweep_config = config["ablation"]
+    original_config = deepcopy(sweep_config)
+    original_config.pop("local_sweep")
+    original = generate_model_runs(base, original_config, tmp_path)
+    expanded = generate_model_runs(base, sweep_config, tmp_path)
+    original_ids = {run["model_id"] for run in original}
+    sweep = [run for run in expanded if run["local_sweep"]]
+
+    assert len(original) == 98
+    assert len(expanded) == 118
+    assert len(sweep) == 24
+    assert len({run["model_id"] for run in sweep} & original_ids) == 4
+    assert {(run["eta"], run["m"], run["s"]) for run in sweep} == {
+        (eta, m, 0.75) for eta in [1, 5, 10, 20, 50, 100] for m in [3, 5, 7, 10]
+    }
+    assert {run["model_id"]: run["model_dir"] for run in original}.items() <= {
+        run["model_id"]: run["model_dir"] for run in expanded
+    }.items()
+
+
+@pytest.mark.parametrize("sweep", [
+    {"eta_values": [0], "m_values": [5], "s_values": [0.5]},
+    {"eta_values": [1], "m_values": [1.5], "s_values": [0.5]},
+    {"eta_values": [1], "m_values": [5], "s_values": []},
+])
+def test_local_sweep_rejects_invalid_grid(tmp_path, sweep):
+    base, config = load_configs()
+    config["local_sweep"] = sweep
+    with pytest.raises(ValueError, match="local_sweep"):
+        generate_model_runs(base, config, tmp_path)

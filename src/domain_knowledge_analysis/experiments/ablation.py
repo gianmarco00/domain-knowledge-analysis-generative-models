@@ -173,6 +173,9 @@ class Ablation:
         plotter = AblationPlotter(self.output_dir, self.ablation_config)
         plotter.plot_figure_1(results)
         plotter.plot_figure_4(results)
+        local_sweep_ids = {run["model_id"] for run in self.runs if run.get("local_sweep")}
+        if local_sweep_ids:
+            plotter.plot_local_sweep(results, local_sweep_ids)
         if selected_model is not None:
             plotter.plot_figure_2(results, selected_model, qualitative_selection)
             plotter.plot_figure_3(results, selected_model, qualitative_selection)

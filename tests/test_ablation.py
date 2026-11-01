@@ -562,6 +562,7 @@ def test_run_respects_fid_limit_and_manual_override(tmp_path, monkeypatch, manua
         row.update(checkpoint_hash=sha256(checkpoint.read_bytes()).hexdigest(), fid_key="fid-key", fid_seed=123, extra_run=False)
         runs.append({**row, "model_dir": model_dir, "config_path": model_dir / "config.yaml"})
     save_rows(rows, tmp_path / "results" / "metrics.csv")
+    runs[-1]["local_sweep"] = True
 
     plotter = Mock()
     monkeypatch.setattr("domain_knowledge_analysis.experiments.ablation.AblationPlotter", Mock(return_value=plotter))
@@ -581,6 +582,7 @@ def test_run_respects_fid_limit_and_manual_override(tmp_path, monkeypatch, manua
     assert summary["max_fid_by_seed"]["42"] == pytest.approx(22.4)
     plotter.plot_figure_1.assert_called_once()
     plotter.plot_figure_4.assert_called_once()
+    assert plotter.plot_local_sweep.call_args.args[1] == {"regularized"}
     if manual_choice is None:
         assert summary["qualitative_selection"] == "unavailable"
         assert summary["models"]["best_overall"] is None

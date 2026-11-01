@@ -162,3 +162,47 @@ def test_lines_do_not_connect_different_seeds(tmp_path, monkeypatch):
     AblationPlotter(tmp_path, {}).plot_figure_1(results + extra)
     # Each M has one line per seed rather than one line across seeds.
     assert [list(line.get_xdata()) for line in figures[0].axes[0].lines[:4]] == [[10.0, 100.0]] * 4
+
+
+def test_local_sweep_uses_ordinary_lora_scores_and_selected_models(tmp_path, monkeypatch):
+    rows = [
+        {"model_id": "ordinary", "seed": 42, "eta": 0, "m": 0, "s": 0, "mode": "ordinary_lora",
+         "test_adapted_target_mse": 0.00137492, "test_adapted_source_mse": 0.02, "test_target_fid": 20},
+        {"model_id": "first", "seed": 42, "eta": 1, "m": 5, "s": 0.75, "mode": "output_gram",
+         "test_adapted_target_mse": 0.00132120, "test_adapted_source_mse": 0.022, "test_target_fid": 18},
+        {"model_id": "second", "seed": 42, "eta": 10, "m": 5, "s": 0.75, "mode": "output_gram",
+         "test_adapted_target_mse": 0.0013, "test_adapted_source_mse": 0.019, "test_target_fid": 19},
+        {"model_id": "not-in-sweep", "seed": 42, "eta": 1000, "m": 5, "s": 0.75, "mode": "output_gram",
+         "test_adapted_target_mse": 0.0001, "test_adapted_source_mse": 0.001, "test_target_fid": 1},
+    ]
+    figures = []
+    monkeypatch.setattr(plt.Figure, "savefig", lambda figure, *args, **kwargs: figures.append(figure))
+    monkeypatch.setattr(plt, "close", lambda *args: None)
+    AblationPlotter(tmp_path, {}).plot_local_sweep(rows, {"first", "second"})
+    figure = figures[0]
+    assert len(figure.axes) == 3
+    assert [list(axis.lines[0].get_xdata()) for axis in figure.axes] == [[1, 10]] * 3
+    assert list(figure.axes[0].lines[0].get_ydata())[0] == pytest.approx(3.90714, rel=1e-5)
+    assert list(figure.axes[1].lines[0].get_ydata())[0] == pytest.approx(-10)
+    assert list(figure.axes[2].lines[0].get_ydata())[0] == pytest.approx(10)
+    assert all(axis.lines[-1].get_ydata()[0] == 0 for axis in figure.axes)
+
+
+def test_local_sweep_separates_strengths_and_seeds_and_handles_zero_baseline(tmp_path, monkeypatch):
+    baseline = {"model_id": "ordinary", "seed": 42, "eta": 0, "m": 0, "s": 0, "mode": "ordinary_lora",
+                "test_adapted_target_mse": 0, "test_adapted_source_mse": 1, "test_target_fid": 10}
+    rows = [baseline, {**baseline, "model_id": "ordinary2", "seed": 43}]
+    for seed in [42, 43]:
+        for strength in [0.1, 0.75]:
+            for eta in [1, 5]:
+                rows.append({"model_id": f"{seed}-{strength}-{eta}", "seed": seed, "eta": eta, "m": 3, "s": strength,
+                             "mode": "output_gram", "test_adapted_target_mse": 1, "test_adapted_source_mse": 0.9,
+                             "test_target_fid": 9})
+    figures = []
+    monkeypatch.setattr(plt.Figure, "savefig", lambda figure, *args, **kwargs: figures.append(figure))
+    monkeypatch.setattr(plt, "close", lambda *args: None)
+    AblationPlotter(tmp_path, {}).plot_local_sweep(rows, {row["model_id"] for row in rows[2:]})
+    assert len(figures[0].axes) == 6
+    for axis in figures[0].axes:
+        assert [list(line.get_xdata()) for line in axis.lines[:2]] == [[1, 5], [1, 5]]
+    assert all(math.isnan(value) for value in figures[0].axes[0].lines[0].get_ydata())

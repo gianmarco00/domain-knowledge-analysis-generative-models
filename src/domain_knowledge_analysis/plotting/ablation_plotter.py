@@ -204,6 +204,71 @@ class AblationPlotter:
         figure.savefig(self.output_dir / "figure_9_target_fid.png", dpi=200)
         plt.close(figure)
 
+    @staticmethod
+    def relative_improvement(row, metric, baselines):
+        """Percentage reduction in a test error compared with ordinary LoRA."""
+        seed = row.get("seed")
+        if seed not in baselines:
+            raise ValueError(f"No ordinary LoRA baseline for seed {seed}.")
+        baseline = float(baselines[seed][metric])
+        value = float(row[metric])
+        if not math.isfinite(baseline) or baseline <= 0 or not math.isfinite(value):
+            return math.nan
+        return 100 * (baseline - value) / baseline
+
+    def plot_local_sweep(self, results, model_ids):
+        regularized, ordinary, _ = self.split_rows(results)
+        rows = [row for row in regularized if row["model_id"] in model_ids]
+        if not rows:
+            raise ValueError("No evaluated models match the local sweep.")
+        baselines = self.ordinary_by_seed(ordinary)
+        strengths = sorted({float(row["s"]) for row in rows})
+        m_values = sorted({int(row["m"]) for row in rows})
+        seeds = sorted({row.get("seed") for row in rows}, key=str)
+        colors = {m: plt.get_cmap("tab10")(index % 10) for index, m in enumerate(m_values)}
+        line_styles = ["-", "--", ":", "-."]
+        metrics = [
+            ("test_adapted_target_mse", "Target MSE improvement (%) ↑"),
+            ("test_adapted_source_mse", "Source MSE improvement (%) ↑"),
+            ("test_target_fid", "Target FID improvement (%) ↑"),
+        ]
+        height = 2.3 + 3.7 * len(strengths)
+        figure, axes = plt.subplots(len(strengths), 3, figsize=(16, height), squeeze=False)
+
+        for row_index, strength in enumerate(strengths):
+            strength_rows = [row for row in rows if float(row["s"]) == strength]
+            eta_values = sorted({float(row["eta"]) for row in strength_rows})
+            for axis, (metric, label) in zip(axes[row_index], metrics):
+                for m in m_values:
+                    for seed_index, seed in enumerate(seeds):
+                        series = sorted((row for row in strength_rows if int(row["m"]) == m and row.get("seed") == seed), key=lambda row: float(row["eta"]))
+                        if not series:
+                            continue
+                        axis.plot([float(row["eta"]) for row in series],
+                                  [self.relative_improvement(row, metric, baselines) for row in series],
+                                  color=colors[m], linestyle=line_styles[seed_index % len(line_styles)],
+                                  marker="o", markersize=6, markeredgecolor="white", markeredgewidth=0.6,
+                                  linewidth=1.4, alpha=0.9)
+                axis.axhline(0, color="0.45", linewidth=0.9, linestyle=":")
+                axis.set_xscale("log")
+                axis.set_xticks(eta_values, [f"{value:g}" for value in eta_values])
+                axis.set_xlim(eta_values[0] / 1.3, eta_values[-1] * 1.3)
+                axis.set_xlabel("Regularization weight η")
+                axis.set_ylabel(label)
+                axis.set_title(f"s = {strength:g}")
+                axis.grid(color="0.9", linestyle="--", linewidth=0.7)
+
+        handles = [Line2D([0], [0], color=colors[m], marker="o", markeredgecolor="white", label=f"{m:g}") for m in m_values]
+        if len(seeds) > 1:
+            handles += [Line2D([0], [0], color="0.35", linestyle=line_styles[index % len(line_styles)], label=f"Seed {seed}") for index, seed in enumerate(seeds)]
+        figure.legend(handles=handles, title="M", loc="upper center", bbox_to_anchor=(0.5, 1 - 0.38 / height), ncol=min(len(handles), 8), frameon=False)
+        figure.suptitle("Local parameter sweep: improvement over ordinary LoRA")
+        figure.text(0.5, 0.54 / height, "Improvement (%) = 100 × (ordinary LoRA score − regularized LoRA score) / ordinary LoRA score", ha="center", fontsize=10)
+        figure.text(0.5, 0.27 / height, "Score = test target MSE, test source MSE, or target FID; each model uses the ordinary LoRA baseline for the same seed.  Above 0% is better.", ha="center", fontsize=9)
+        figure.tight_layout(rect=(0, 0.9 / height, 1, 1 - 1.05 / height))
+        figure.savefig(self.output_dir / "figure_10_local_parameter_sweep.png", dpi=200)
+        plt.close(figure)
+
     def plot_qualitative(self, results):
         selected_label = self.selected_model_label(results["selected_model"])
         source_label = self.config.get("source_label", "Clean MNIST")

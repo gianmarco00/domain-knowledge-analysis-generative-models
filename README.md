@@ -25,6 +25,10 @@ Figures 1–4 express each model’s signed test reconstruction MSE change as a 
 
 Figure 1 has a pair of plots for each transformation strength. Figures 2 and 9 show the selected best-overall model’s strength, and figure 3 shows its regularization weight. If no best-overall model is eligible, they use the FID-eligible best-target-gain fallback and say so in their titles. Lines connect comparable runs within each seed; FID points are not connected.
 
+An optional `ablation.local_sweep` defines an additional Cartesian grid of `eta_values`, `m_values`, and `s_values` for every configured seed. For example, the ellipse configuration compares η = 1, 5, 10, 20, 50, 100; M = 3, 5, 7, 10; and s = 0.75. Figure 10, `figures/figure_10_local_parameter_sweep.png`, shows one row of target MSE, source MSE, and target FID improvement plots per s. Each percentage is `100 × (ordinary LoRA score − regularized LoRA score) / ordinary LoRA score`, using test scores and the ordinary LoRA model for the same seed. Above zero means an improvement; a zero baseline makes the percentage undefined. Lines connect the same M and seed across η. Local-sweep models also participate in the other ablation plots and model selection.
+
+The sweep uses the same model identities as the main grid. Overlapping runs reuse their existing completed checkpoints and compatible saved metrics and FIDs; only missing or invalidated results are computed. A changed training configuration still produces a different model identity.
+
 Inception was trained on natural images, so these FID values are best interpreted as a relative comparison within this study rather than a definitive measure of image quality.
 
 ### Best-model selection
