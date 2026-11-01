@@ -86,6 +86,11 @@ def save_yaml(data, path):
         yaml.safe_dump(data, file, sort_keys=False)
 
 
+def model_training_completed(model_dir):
+    checkpoint_dir = Path(model_dir) / "checkpoints"
+    return (checkpoint_dir / "best.pt").exists() and (checkpoint_dir / "last.pt").exists()
+
+
 def generate_model_runs(base_config, ablation_config, output_dir):
     output_dir = Path(output_dir)
     regularizer_mode = ablation_config["regularizer_mode"]
@@ -97,17 +102,38 @@ def generate_model_runs(base_config, ablation_config, output_dir):
         config = create_training_config(base_config, seed, eta, subset, strength if subset else None, mode if is_regularized else None)
         model_id = training_config_id(config)
 
+        m = len(subset)
+        def model_directory(candidate_id):
+            model_name = f"{mode}_seed_{seed}_eta_{float(eta):g}_M_{m}_s_{float(strength):g}_{candidate_id}"
+            return output_dir / "models" / model_name
+
+        # Before this option existed, omitted meant the current default, True.
+        # Prefer a completed old run, or a completed explicitly-True run if no
+        # old run exists. False and all other configuration changes stay distinct.
+        regularizer = config["lora"].get("regularizer")
+        if regularizer and regularizer.get("trace_normalization", True) is True:
+            legacy_config = deepcopy(config)
+            legacy_config["lora"]["regularizer"].pop("trace_normalization", None)
+            legacy_id = training_config_id(legacy_config)
+            if model_training_completed(model_directory(legacy_id)):
+                model_id = legacy_id
+            else:
+                explicit_config = deepcopy(legacy_config)
+                explicit_config["lora"]["regularizer"]["trace_normalization"] = True
+                explicit_id = training_config_id(explicit_config)
+                if model_training_completed(model_directory(explicit_id)):
+                    model_id = explicit_id
+
         if model_id in runs:
             if local_sweep:
                 runs[model_id]["local_sweep"] = True
             return
 
-        m = len(subset)
-        model_name = f"{mode}_seed_{seed}_eta_{float(eta):g}_M_{m}_s_{float(strength):g}_{model_id}"
-        model_dir = output_dir / "models" / model_name
+        model_dir = model_directory(model_id)
         config["paths"]["run_dir"] = str(model_dir)
         config_path = model_dir / "config.yaml"
-        save_yaml(config, config_path)
+        if not (model_training_completed(model_dir) and config_path.exists()):
+            save_yaml(config, config_path)
 
         runs[model_id] = {
             "model_id": model_id,

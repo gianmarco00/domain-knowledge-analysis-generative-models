@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from domain_knowledge_analysis import utils
 from domain_knowledge_analysis.experiments.experiment import Experiment
-from domain_knowledge_analysis.experiments.ablation_utils import generate_model_runs, save_rows, save_yaml, select_best_models, select_manual_model, validate_fid_increase
+from domain_knowledge_analysis.experiments.ablation_utils import generate_model_runs, model_training_completed, save_rows, save_yaml, select_best_models, select_manual_model, validate_fid_increase
 from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
 from domain_knowledge_analysis.scoring import AdaptationScorer
 
@@ -35,11 +35,6 @@ def initialize_ablation_worker(positions, progress_lock):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     WORKER_PROGRESS_POSITION = positions.get()
     tqdm.set_lock(progress_lock)
-
-
-def model_training_completed(model_dir):
-    checkpoint_dir = Path(model_dir) / "checkpoints"
-    return (checkpoint_dir / "best.pt").exists() and (checkpoint_dir / "last.pt").exists()
 
 
 def train_ablation_model(config_path, progress_position=None):

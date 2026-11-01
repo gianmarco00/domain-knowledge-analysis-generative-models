@@ -295,3 +295,57 @@ def test_local_sweep_rejects_invalid_grid(tmp_path, sweep):
     config["local_sweep"] = sweep
     with pytest.raises(ValueError, match="local_sweep"):
         generate_model_runs(base, config, tmp_path)
+
+
+def test_explicit_default_reuses_legacy_completed_models_without_overwriting(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    with open(root / "config" / "ablation_vae_ellipsis.yaml") as file:
+        config = yaml.safe_load(file)["ablation"]
+    with open(root / "config" / "lora_vae_ellipsis.yaml") as file:
+        base = yaml.safe_load(file)
+    config.update(eta_values=[10], m_values=[5], s_values=[0.75])
+    config.pop("local_sweep")
+    old_base = deepcopy(base)
+    old_base["lora"]["regularizer"].pop("trace_normalization")
+    legacy_runs = generate_model_runs(old_base, config, tmp_path)
+    for run in legacy_runs:
+        checkpoint_dir = run["model_dir"] / "checkpoints"
+        checkpoint_dir.mkdir()
+        (checkpoint_dir / "best.pt").write_bytes(b"saved model")
+        (checkpoint_dir / "last.pt").write_bytes(b"completed model")
+    old_configs = {run["model_id"]: run["config_path"].read_bytes() for run in legacy_runs}
+    metrics_path = tmp_path / "results" / "metrics.csv"
+    metrics_path.parent.mkdir()
+    metrics_path.write_text("model_id,test_target_fid\nsaved,30.5\n")
+    old_metrics = metrics_path.read_bytes()
+
+    new_runs = generate_model_runs(base, config, tmp_path)
+    assert {run["model_id"] for run in new_runs} == {run["model_id"] for run in legacy_runs}
+    assert all(run["config_path"].read_bytes() == old_configs[run["model_id"]] for run in new_runs)
+    assert all((run["model_dir"] / "checkpoints" / "best.pt").read_bytes() == b"saved model" for run in new_runs)
+    assert metrics_path.read_bytes() == old_metrics
+    regularized = next(run for run in new_runs if run["m"] == 5)
+    assert regularized["model_id"] == "f6a1dbca3a"
+
+    changed_base = deepcopy(base)
+    changed_base["lora"]["regularizer"]["trace_normalization"] = False
+    changed_runs = generate_model_runs(changed_base, config, tmp_path)
+    assert next(run for run in changed_runs if run["m"] == 5)["model_id"] != regularized["model_id"]
+
+
+def test_omitted_default_can_reuse_a_completed_explicit_true_run(tmp_path):
+    base, config = load_configs()
+    config.update(eta_values=[10], m_values=[5], s_values=[0.5])
+    config["extra_runs"] = []
+    base["lora"]["regularizer"]["trace_normalization"] = True
+    explicit_runs = generate_model_runs(base, config, tmp_path)
+    explicit = next(run for run in explicit_runs if run["m"] == 5)
+    checkpoint_dir = explicit["model_dir"] / "checkpoints"
+    checkpoint_dir.mkdir()
+    (checkpoint_dir / "best.pt").touch()
+    (checkpoint_dir / "last.pt").touch()
+    old_base = deepcopy(base)
+    old_base["lora"]["regularizer"].pop("trace_normalization")
+
+    reused_runs = generate_model_runs(old_base, config, tmp_path)
+    assert next(run for run in reused_runs if run["m"] == 5)["model_id"] == explicit["model_id"]
