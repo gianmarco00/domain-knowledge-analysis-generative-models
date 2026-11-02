@@ -80,14 +80,17 @@ def generate_target_geometry_runs(base_config, ablation_config, output_dir):
 
 
 class TargetGeometryAblation(Ablation):
-    def __init__(self, config_path):
+    def __init__(self, config_path, plots_only=False):
         self.config = utils.load_config(config_path)
         self.repo_root = utils.get_repo_root()
         self.base_config = utils.load_config(self.repo_root / self.config["base_config"])
         self.ablation_config = self.config["ablation"]
         self.output_dir = self.repo_root / self.ablation_config["output_dir"]
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.runs = generate_target_geometry_runs(self.base_config, self.ablation_config, self.output_dir)
+        # Plot-only runs consume saved scores/banks, without generating configs,
+        # touching model directories, constructing FID, or loading a model.
+        self.runs = ([] if plots_only else
+                     generate_target_geometry_runs(self.base_config, self.ablation_config, self.output_dir))
         self.fid = None
         self.fid_reference_key = None
 
@@ -125,7 +128,18 @@ class TargetGeometryAblation(Ablation):
             saved[run["model_id"]] = row
             save_rows(list(saved.values()), metrics_path)
 
+        return self.render_results(results)
+
+    def replot_saved_results(self):
+        results = list(self.load_saved_results(self.output_dir / "results" / "metrics.csv").values())
+        if not results:
+            raise ValueError("No saved target-geometry metrics to plot. Run the ablation first.")
+        return self.render_results(results, cached_only=True)
+
+    def render_results(self, results, cached_only=False):
         regularized = [row for row in results if row["eta"] and row["view"] == "full"]
+        if not regularized:
+            raise ValueError("No evaluated full-view target-geometry models to select.")
         selected = min(regularized, key=lambda row: row["validation_adapted_target_mse"])
         save_yaml({"selection": "minimum validation target reconstruction MSE among full-view runs",
                    "selected_model": selected}, self.output_dir / "results" / "selected_model.yaml")
@@ -145,10 +159,19 @@ class TargetGeometryAblation(Ablation):
                 aggregate[metric + "_std"] = values.std(unbiased=True).item() if len(rows) > 1 else 0.0
             aggregates.append(aggregate)
         save_rows(aggregates, self.output_dir / "results" / "summary.csv")
-        self.plot_geometry_results(aggregates)
         from domain_knowledge_analysis.plotting.target_geometry_plotter import TargetGeometryPlotter
         TargetGeometryPlotter(self.output_dir, self.ablation_config).plot_metric_pairs(results)
-        self.plot_reconstructions(selected)
+        if cached_only:
+            path = self.output_dir / "results" / "qualitative_examples.pt"
+            if not path.exists():
+                raise ValueError("Saved qualitative image bank is missing. Rerun the ablation normally to regenerate it from completed models.")
+            qualitative = torch.load(path, map_location="cpu", weights_only=True)
+            saved_selection = qualitative["selected_model"]
+            if any(saved_selection.get(key) != selected.get(key) for key in ("model_id", "checkpoint_hash")):
+                raise ValueError("Saved qualitative bank does not match the selected checkpoint. Rerun the ablation normally to refresh it.")
+            TargetGeometryPlotter(self.output_dir, self.ablation_config).plot_qualitative(qualitative)
+        else:
+            self.plot_reconstructions(selected)
         print(f"Results saved in {self.output_dir}")
         return results
 
@@ -167,28 +190,6 @@ class TargetGeometryAblation(Ablation):
                 if key not in strings and value != "":
                     row[key] = int(value) if key in {"seed", "geometry_batch_size", "fid_seed"} else float(value)
         return {row["model_id"]: row for row in rows}
-
-    def plot_geometry_results(self, rows):
-        import matplotlib.pyplot as plt
-        figure, axes = plt.subplots(1, 3, figsize=(16, 4.5))
-        metrics = [("test_adapted_target_mse", "Target reconstruction MSE"),
-                   ("test_source_degradation", "Source MSE increase"), ("test_target_fid", "Target FID")]
-        for axis, (metric, title) in zip(axes, metrics):
-            baseline = next(row for row in rows if row["view"] == "ordinary_lora")
-            axis.axhline(baseline[metric + "_mean"], color="black", linestyle="--", label="Ordinary LoRA")
-            groups = sorted({(r["view"], r["geometry_batch_size"], r["dual_learning_rate"]) for r in rows if r["eta"]})
-            for view, batch_size, rate in groups:
-                series = sorted((r for r in rows if (r["view"], r["geometry_batch_size"], r["dual_learning_rate"]) == (view, batch_size, rate)), key=lambda r: r["eta"])
-                axis.errorbar([r["eta"] for r in series], [r[metric + "_mean"] for r in series],
-                              yerr=[r[metric + "_std"] for r in series], marker="o", capsize=3,
-                              label=f"{view}, B={batch_size}, dual step={rate:g}")
-            axis.set(xscale="log", xlabel="eta", title=title)
-        axes[0].legend(fontsize=7)
-        figure.tight_layout()
-        path = self.output_dir / "figures" / "target_geometry.png"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(path, dpi=180)
-        plt.close(figure)
 
     def create_qualitative_results(self, selected):
         """Use fixed held-out inputs and common prior draws across all models."""

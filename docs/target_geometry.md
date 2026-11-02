@@ -152,51 +152,66 @@ results in `results/summary.csv` when drawing experimental conclusions.
 
 ## Result figures
 
-Each ablation automatically generates the following files in `figures/` after
-training and scoring; these are generated from the actual saved models/metrics:
+Each ablation generates five figures in `figures/`:
 
-- `eta_retention_gain_dual_0.001.png`, `eta_retention_gain_dual_0.01.png`, and
-  `eta_retention_gain_dual_0.1.png`: **two panels per dual learning rate**, source
-  retention and target gain versus eta. Geometry batch sizes use distinct,
-  consistent line colors. Each point is the across-seed mean with ±1 sample
-  standard deviation error bars. Only full two-view runs enter these curves;
-  controls remain visible in the overview and CSV summaries.
-- `figure_5_source_reconstructions.png`: held-out source inputs, source VAE
-  reconstructions, ordinary LoRA reconstructions and selected target-geometry
-  reconstructions of exactly the same images.
-- `figure_6_target_reconstructions.png`: the equivalent comparison on held-out
-  target images. `target_reconstructions.png` is retained as an alias.
-- `figure_7_generations.png`: prior generations from the source VAE, ordinary
-  LoRA and selected target-geometry model using **the same N(0,I) latent vectors**.
-- `target_geometry.png`: the overview of target reconstruction MSE, source MSE
-  increase and target FID, including the one-view controls.
+- `figure_1_eta_all.png`: one row per dual learning rate, with target MSE,
+  source MSE and target FID as the three columns. Includes every evaluated
+  eta, geometry batch size, seed and view (full, target only, source only).
+- `figure_2_eta_zoom.png`: the same layout with automatic scale selection.
+- `figure_3_source_reconstructions.png`: held-out source inputs, source VAE,
+  ordinary LoRA and selected target-geometry reconstructions.
+- `figure_4_target_reconstructions.png`: the corresponding held-out target
+  comparison, using identical inputs across model columns.
+- `figure_5_generations.png`: source VAE, ordinary LoRA and selected
+  target-geometry generations using the same N(0,I) latent vectors.
 
-The eta plots follow the existing regularizer's per-seed normalization convention
-for target gain, and express source retention as 100 minus its normalized source
-degradation. With S=source VAE, L=ordinary LoRA and P=plotted model:
+The eta plots match the output-Gram local-sweep convention:
 
 ```
-source_degradation(P) = MSE_source(P) - MSE_source(S)
-target_gain(P)        = MSE_target(S) - MSE_target(P)
-
-Source retention (%) = 100 * (1 - source_degradation(P) / source_degradation(L))
-Target gain (%)      = 100 * target_gain(P) / target_gain(L)
+improvement (%) = 100 * (ordinary_LoRA_score - model_score) / ordinary_LoRA_score
+score = test target MSE, test source MSE, or test target FID
 ```
 
-Thus source VAE has retention=100% and gain=0%; ordinary LoRA has retention=0%
-and gain=100%. Both axes prefer higher values. Values are not clipped: negative
-retention means worse forgetting than ordinary LoRA, and retention above 100%
-means source reconstruction improved beyond the source VAE. Each model is
-normalized against the ordinary LoRA run **with the same seed before averaging**.
-This is a measure of recovering LoRA's source degradation, not pixel accuracy.
+Unregularized LoRA is **0%**, positive is better, and negative is worse. Each
+point is normalized against ordinary LoRA with the **same seed**. Color identifies
+geometry batch size B; marker/line style identifies the decoder view. Individual
+seed trajectories remain separate, as in the output-Gram parameter sweep.
+A nonpositive/nonfinite baseline score is rejected because the requested
+percentage is undefined; no artificial denominator or alternative metric is used.
+One-view controls appear only at their actually evaluated dual learning rates.
 
-If any ordinary LoRA seed has a zero or negative reference change for a metric,
-that metric uses raw MSE changes for all dual-rate figures instead of dividing
-by the invalid reference or reversing the direction. Raw source retention is
-`MSE_source(S)-MSE_source(P)`, with zero representing source VAE performance;
-raw target gain is `MSE_target(S)-MSE_target(P)`. The axis and formula captions
-state the units used. Error bars describe variation across seeds, not confidence
-intervals or calibration uncertainty.
+For each metric, the zoom first averages improvements across seeds for every
+(rate, view, B, eta) setting and finds the best mean. Its symmetric half-range
+is `abs(best_mean_improvement) + 5` **percentage points**, shared across LR rows
+for consistent comparison. For example, FID 20 reduced to 17 is a 15% improvement,
+so the range is -20% to +20%, equivalent to raw FID 16–24. If every setting is
+worse than LoRA, the least-bad mean and the same padding determine the range;
+flat scores produce a minimum range of ±5 percentage points.
+
+Eta selection is independent for each (LR, metric) panel: an eta is retained
+iff at least one individual sample, including controls, lies inside or exactly
+on that panel's limits. Etas with every sample outside are removed from the
+points and ticks. At retained etas, off-scale samples use outward triangles
+at the boundary, and their connecting segments are dotted in the original
+batch-size color. A connection that skips an omitted, off-scale eta is also
+dotted. Dots and boundary markers indicate clipped display values; the CSV
+scores and the all-model figure retain the full values.
+
+Rerunning the normal ablation skips completed best+last checkpoints and reuses
+valid cached metrics/FID; plot-only code changes do not change model IDs or the
+FID scoring fingerprint. To regenerate figures entirely from saved metrics
+and `results/qualitative_examples.pt`, with no model loading, training or scoring:
+
+```bash
+python scripts/run_ablation.py config/ablation_vae_mnist_target_geometry.yaml --plots-only
+python scripts/run_ablation.py config/ablation_vae_ellipsis_target_geometry.yaml --plots-only
+```
+
+Plot-only mode uses all rows already saved in that output directory, regardless
+of later sweep YAML edits. It requires the saved qualitative bank to match the
+selected model/checkpoint; otherwise a normal rerun recreates that bank from
+the completed models. The obsolete overview, per-LR eta files, reconstruction
+alias and old 5/6/7 filenames are removed after their replacement figures render.
 
 Qualitative examples are sampled reproducibly from held-out test datasets using
 `visual_seed`; the same indices are used in the source and transported target

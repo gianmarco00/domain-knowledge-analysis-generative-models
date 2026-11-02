@@ -105,17 +105,17 @@ def test_experiment_uses_isolated_trainer_and_source_checkpoint_split(monkeypatc
 
 
 def test_geometry_plots_use_geometry_metadata(tmp_path):
-    ablation = TargetGeometryAblation.__new__(TargetGeometryAblation)
-    ablation.output_dir = tmp_path
+    from domain_knowledge_analysis.plotting.target_geometry_plotter import TargetGeometryPlotter
     rows = []
     for view, eta, batch_size in (("ordinary_lora", 0., 0), ("full", 10., 64), ("full", 100., 64), ("source_only", 100., 64)):
-        row = {"view": view, "eta": eta, "geometry_batch_size": batch_size, "dual_learning_rate": .01}
-        for metric in ("test_adapted_target_mse", "test_source_degradation", "test_target_fid"):
-            row[metric + "_mean"] = .1
-            row[metric + "_std"] = .01
+        row = {"view": view, "seed": 42, "eta": eta, "geometry_batch_size": batch_size, "dual_learning_rate": .01}
+        for metric, _ in TargetGeometryPlotter.METRICS:
+            row[metric] = .1
         rows.append(row)
-    ablation.plot_geometry_results(rows)
-    assert (tmp_path / "figures" / "target_geometry.png").stat().st_size > 1000
+    TargetGeometryPlotter(tmp_path, {}).plot_metric_pairs(rows)
+    assert (tmp_path / "figures" / "figure_1_eta_all.png").stat().st_size > 1000
+    assert (tmp_path / "figures" / "figure_2_eta_zoom.png").stat().st_size > 1000
+    assert not (tmp_path / "figures" / "target_geometry.png").exists()
 
 
 def test_standard_adaptation_plot_supports_new_base_config(tmp_path, monkeypatch):
@@ -139,9 +139,10 @@ def test_ablation_scoring_selection_and_cached_metadata(monkeypatch, tmp_path):
     ablation.output_dir = tmp_path
     ablation.ablation_config = sweep
     ablation.runs = generate_target_geometry_runs(config, sweep, tmp_path)
-    ablation.train_models = lambda: None
+    # Exercise the real completed-run check: rendering/scoring must never
+    # dispatch workers or prepare training data for existing best+last models.
+    ablation.prepare_dataset_caches = lambda *_: pytest.fail("Completed models must not be retrained")
     ablation.prepare_fid = lambda _: ("reference", "fid-key")
-    ablation.plot_geometry_results = lambda _: None
     selections = []
     ablation.plot_reconstructions = selections.append
     scored = []
@@ -150,7 +151,8 @@ def test_ablation_scoring_selection_and_cached_metadata(monkeypatch, tmp_path):
         # The one-view control scores better, but the selected full-method
         # model is explicitly chosen among full-view runs for inspection.
         return {"validation_adapted_target_mse": .2 if experiment.view == "full" else .1,
-                "test_adapted_target_mse": .2, "test_source_degradation": .1, "test_target_gain": .1, "test_target_fid": 10.}
+                "test_adapted_target_mse": .2, "test_adapted_source_mse": .3,
+                "test_source_degradation": .1, "test_target_gain": .1, "test_target_fid": 10.}
     ablation.evaluate = evaluate
     ablation.load_or_train = lambda run: SimpleNamespace(view=run["view"], logger=SimpleNamespace(close=lambda: None))
     import domain_knowledge_analysis.experiments.target_geometry_ablation as module
@@ -159,6 +161,7 @@ def test_ablation_scoring_selection_and_cached_metadata(monkeypatch, tmp_path):
         checkpoint = run["model_dir"] / "checkpoints" / "best.pt"
         checkpoint.parent.mkdir()
         checkpoint.write_bytes(b"model")
+        (checkpoint.parent / "last.pt").write_bytes(b"model")
         if run["eta"]:
             torch.save({"eta": 100., "dual_fraction": .25,
                         "calibration": {"source_tolerance": .04, "standard_error": .001}},
