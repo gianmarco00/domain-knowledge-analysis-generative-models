@@ -1,0 +1,30 @@
+selection: minimum validation target reconstruction MSE among full-view runs
+selected_model:
+  model_id: 62029dfc7d
+  model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_target_geometry/models/target_geometry_full_seed_42_eta_1000_B_64_62029dfc7d
+  config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_target_geometry/models/target_geometry_full_seed_42_eta_1000_B_64_62029dfc7d/config.yaml
+  seed: 42
+  eta: 1000.0
+  mode: target_geometry
+  view: full
+  geometry_batch_size: 64
+  dual_learning_rate: 0.001
+  validation_base_target_mse: 0.024325691719849905
+  validation_base_source_mse: 0.007828303317228953
+  validation_adapted_target_mse: 0.006819392651319504
+  validation_adapted_source_mse: 0.030941262662410735
+  validation_target_gain: 0.0175062990685304
+  validation_source_degradation: 0.02311295934518178
+  test_base_target_mse: 0.02474320251047611
+  test_base_source_mse: 0.007944586436450482
+  test_adapted_target_mse: 0.006734824600070715
+  test_adapted_source_mse: 0.03030328394472599
+  test_target_gain: 0.018008377910405396
+  test_source_degradation: 0.02235869750827551
+  test_target_fid: 17.608434677124023
+  fid_seed: 123
+  checkpoint_hash: 88565ed8662c2dabeaff672a407111942bc1915ccfcd5f1efe066ca0d44639d7
+  fid_key: 191474ee637f42b79e19483c1f3188f70876116369292e64b29caf41c4a518ff
+  source_tolerance: 0.04126790736336261
+  calibration_standard_error: 0.0005872613358190989
+  dual_multiplier: 208.25722052540863

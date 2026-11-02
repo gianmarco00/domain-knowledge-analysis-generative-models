@@ -5,18 +5,21 @@ base_config: config/lora_vae_mnist_target_geometry.yaml
 ablation:
   regularizer_mode: target_geometry
   output_dir: ablations/vae_mnist_target_geometry
-  parallel_models: 2
+  parallel_models: 8
   seeds:
   - 42
-  - 43
-  - 44
   eta_values:
+  - 1.0
   - 10.0
   - 100.0
   - 1000.0
+  - 10000.0
+  - 100000.0
   geometry_batch_sizes:
+  - 32
   - 64
   - 128
+  - 256
   dual_learning_rates:
   - 0.001
   - 0.01

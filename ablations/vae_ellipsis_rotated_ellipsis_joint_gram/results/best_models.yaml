@@ -4,10 +4,10 @@ required_target_gain: 0.07428899807631968
 max_fid_increase_fraction: 0.12
 max_fid_by_seed:
   '42': 34.76568115234375
-num_fid_eligible_models: 57
+num_fid_eligible_models: 55
 best_regularized_target_gain: 0.07828322856128216
 best_regularized_target_fraction: 1.0010778050447808
-num_eligible_models: 57
+num_eligible_models: 55
 manual_best_model: null
 automatic_best_overall_model_id: e20ea6fd46
 qualitative_selection: best_overall

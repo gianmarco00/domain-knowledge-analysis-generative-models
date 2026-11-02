@@ -1,0 +1,95 @@
+target_gain_fraction: 0.95
+ordinary_target_gain: 0.07824061349034309
+required_target_gain: 0.07432858281582592
+max_fid_increase_fraction: 0.12
+max_fid_by_seed:
+  '42': 34.14234405517578
+num_fid_eligible_models: 29
+best_regularized_target_gain: 0.07827745695412158
+best_regularized_target_fraction: 1.000470899474517
+num_eligible_models: 29
+manual_best_model: null
+automatic_best_overall_model_id: e4e282638a
+qualitative_selection: best_overall
+models:
+  best_target_gain:
+    model_id: 6b22407dc9
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram_2/models/joint_gram_seed_42_eta_1_M_20_s_0.1_6b22407dc9
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram_2/models/joint_gram_seed_42_eta_1_M_20_s_0.1_6b22407dc9/config.yaml
+    seed: 42
+    eta: 1.0
+    mode: joint_gram
+    m: 20
+    s: 0.1
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+rotation+horizontal_wave+vertical_wave+perspective+vertical_perspective+swirl+radial_bulge+vignette+contrast+gamma_correction+binarization+sharpen
+    extra_run: false
+    validation_base_target_mse: 0.07960288715362548
+    validation_base_source_mse: 0.0012379644811153412
+    validation_adapted_target_mse: 0.0013254301995038987
+    validation_adapted_source_mse: 0.07611839962005615
+    validation_target_gain: 0.07827745695412158
+    validation_source_degradation: 0.07488043513894081
+    test_base_target_mse: 0.08195457458496094
+    test_base_source_mse: 0.0012655829191207885
+    test_adapted_target_mse: 0.0013790783435106277
+    test_adapted_source_mse: 0.0781022548675537
+    test_target_gain: 0.08057549624145031
+    test_source_degradation: 0.07683667194843291
+    test_target_fid: 30.449556350708008
+    fid_seed: 123
+    checkpoint_hash: b2d7f028f212b4a7fbe7629d8aa8f87d319386dad1cd2bba78e7689ffb3600db
+    fid_key: 954b7b7e45931557f44ca7fcdaf2c62229d8ed1b76038cf469c3ea79a49078b5
+  best_source_degradation:
+    model_id: e4e282638a
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram_2/models/joint_gram_seed_42_eta_1_M_10_s_0.95_e4e282638a
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram_2/models/joint_gram_seed_42_eta_1_M_10_s_0.95_e4e282638a/config.yaml
+    seed: 42
+    eta: 1.0
+    mode: joint_gram
+    m: 10
+    s: 0.95
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+rotation+horizontal_wave
+    extra_run: false
+    validation_base_target_mse: 0.07960288715362548
+    validation_base_source_mse: 0.0012379644811153412
+    validation_adapted_target_mse: 0.0013491445481777192
+    validation_adapted_source_mse: 0.07430491685867309
+    validation_target_gain: 0.07825374260544776
+    validation_source_degradation: 0.07306695237755775
+    test_base_target_mse: 0.08195457458496094
+    test_base_source_mse: 0.0012655829191207885
+    test_adapted_target_mse: 0.001384099081158638
+    test_adapted_source_mse: 0.07614245510101318
+    test_target_gain: 0.08057047550380231
+    test_source_degradation: 0.07487687218189239
+    test_target_fid: 30.823259353637695
+    fid_seed: 123
+    checkpoint_hash: f9d964ae650e7c319652550bf1935c983ebddff933b93366dd6d363d66ce3644
+    fid_key: 954b7b7e45931557f44ca7fcdaf2c62229d8ed1b76038cf469c3ea79a49078b5
+  best_overall:
+    model_id: e4e282638a
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram_2/models/joint_gram_seed_42_eta_1_M_10_s_0.95_e4e282638a
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram_2/models/joint_gram_seed_42_eta_1_M_10_s_0.95_e4e282638a/config.yaml
+    seed: 42
+    eta: 1.0
+    mode: joint_gram
+    m: 10
+    s: 0.95
+    subset: horizontal_translation+vertical_translation+isotropic_scale+aspect_ratio_deformation+diagonal_shear+vertical_shear+stroke_thickness+gaussian_blur+rotation+horizontal_wave
+    extra_run: false
+    validation_base_target_mse: 0.07960288715362548
+    validation_base_source_mse: 0.0012379644811153412
+    validation_adapted_target_mse: 0.0013491445481777192
+    validation_adapted_source_mse: 0.07430491685867309
+    validation_target_gain: 0.07825374260544776
+    validation_source_degradation: 0.07306695237755775
+    test_base_target_mse: 0.08195457458496094
+    test_base_source_mse: 0.0012655829191207885
+    test_adapted_target_mse: 0.001384099081158638
+    test_adapted_source_mse: 0.07614245510101318
+    test_target_gain: 0.08057047550380231
+    test_source_degradation: 0.07487687218189239
+    test_target_fid: 30.823259353637695
+    fid_seed: 123
+    checkpoint_hash: f9d964ae650e7c319652550bf1935c983ebddff933b93366dd6d363d66ce3644
+    fid_key: 954b7b7e45931557f44ca7fcdaf2c62229d8ed1b76038cf469c3ea79a49078b5
