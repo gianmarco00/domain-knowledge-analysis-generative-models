@@ -5,11 +5,9 @@ base_config: config/lora_vae_ellipsis_target_geometry.yaml
 ablation:
   regularizer_mode: target_geometry
   output_dir: ablations/vae_ellipsis_target_geometry
-  parallel_models: 2
+  parallel_models: 8
   seeds:
   - 42
-  - 43
-  - 44
   eta_values:
   - 10.0
   - 100.0
