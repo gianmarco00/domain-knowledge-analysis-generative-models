@@ -172,8 +172,11 @@ def test_emnist_lora_config_preserves_existing_source_and_training_settings():
     assert emnist["dataset"]["name"] == "mnist"
     assert emnist["lora"]["transformed_dataset"]["name"] == "emnist"
     assert "type" not in emnist["lora"]["transformed_dataset"]
+    geometry = utils.load_config(config_dir / "lora_vae_mnist_target_geometry.yaml")
+    assert emnist["lora"]["regularizer"] == geometry["lora"]["regularizer"]
     emnist["experiment"] = original["experiment"]
     emnist["lora"]["transformed_dataset"] = original["lora"]["transformed_dataset"]
+    emnist["lora"]["regularizer"] = original["lora"]["regularizer"]
     assert emnist == original
 
 

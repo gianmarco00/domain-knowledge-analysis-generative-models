@@ -31,8 +31,9 @@ lora:
 ```
 
 [The EMNIST LoRA configuration](config/lora_vae_mnist_emnist.yaml) provides a
-complete example with the same source checkpoint, architecture, LoRA settings
-and regularizer as `lora_vae_mnist.yaml`. Registered dataset names select the
+complete example with the same source checkpoint, architecture and LoRA settings
+as `lora_vae_mnist.yaml`, and the `target_geometry` regularizer settings from
+`lora_vae_mnist_target_geometry.yaml`. Registered dataset names select the
 dataset directly for target training, validation, test scoring and FID. Old
 `type`/`intensity` fields are ignored when a registered dataset is selected, so
 changing the target name to `emnist` cannot accidentally rotate MNIST or EMNIST.
@@ -47,6 +48,18 @@ lora:
     type: rotation
     intensity: 45.0
 ```
+
+Run the MNIST-to-EMNIST target-geometry ablation from the repository root:
+
+```bash
+./.venv/bin/python scripts/run_ablation.py config/ablation_vae_mnist_emnist_target_geometry.yaml
+```
+
+It reuses the saved rotated-MNIST study's sweep: seed 42; eta values 1, 10,
+100, 1,000, 10,000 and 100,000; geometry batch sizes 32, 64, 128 and 256;
+and dual learning rates 0.001, 0.01 and 0.1. Including ordinary LoRA and both
+one-view controls, this creates 75 runs with eight parallel workers. Results
+are saved under `ablations/vae_mnist_emnist_target_geometry`.
 
 ## Target geometry regularizer
 

@@ -1,0 +1,40 @@
+# Same sweep as the saved rotated-MNIST target-geometry study.
+# 75 runs: 1 seed x (1 ordinary LoRA + 72 full-view grid points + 2 one-view controls).
+# Full grid: 6 eta x 4 geometry batch sizes x 3 dual learning rates per seed.
+# B is shared by source calibration, target training geometry and geometry validation.
+base_config: config/lora_vae_mnist_emnist.yaml
+ablation:
+  regularizer_mode: target_geometry
+  output_dir: ablations/vae_mnist_emnist_target_geometry
+  parallel_models: 8
+  seeds:
+  - 42
+  eta_values:
+  - 1.0
+  - 10.0
+  - 100.0
+  - 1000.0
+  - 10000.0
+  - 100000.0
+  geometry_batch_sizes:
+  - 32
+  - 64
+  - 128
+  - 256
+  dual_learning_rates:
+  - 0.001
+  - 0.01
+  - 0.1
+  controls:
+  - view: target_only
+    eta: 100.0
+    geometry_batch_size: 64
+  - view: source_only
+    eta: 100.0
+    geometry_batch_size: 64
+  visual_seed: 123
+  fid_seed: 123
+  fid_batch_size: 512
+  num_qualitative_images: 6
+  source_label: MNIST source
+  target_label: EMNIST digit-like letters target
