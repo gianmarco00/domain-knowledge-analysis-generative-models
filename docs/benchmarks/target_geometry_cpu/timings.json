@@ -1,0 +1,253 @@
+{
+  "metadata": {
+    "torch": "2.12.1",
+    "python": "3.12.3",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "device": "cpu",
+    "threads": 4,
+    "reference_ref": "775c21b",
+    "steps": 40,
+    "warmup": 5,
+    "epochs": 1,
+    "calibration_batches": 128,
+    "validation_batches": 64
+  },
+  "results": [
+    {
+      "dataset": "mnist",
+      "geometry_batch_size": 64,
+      "implementation": "reference",
+      "calibration_seconds": 2.2583557920297608,
+      "source_tolerance": 0.04126536883995868,
+      "sampling": {
+        "source_batch_ms": 1.4283724990673363,
+        "target_batch_ms": 0.6083845801185817
+      },
+      "stage_ms": {
+        "vae_forward_loss": 45.35404166090302,
+        "geometry_sample": 0.5305042577674612,
+        "geometry_forward": 27.104662533383816,
+        "backward": 131.99460620235186,
+        "optimizer": 0.9059041942236945,
+        "dual_update": 0.005856185453012586
+      },
+      "epochs": [
+        {
+          "train_seconds": 77.33028162491973,
+          "validation_seconds": 6.642252583988011,
+          "train_loss": 170.85883625856445,
+          "validation_loss": 157.56590915693994,
+          "dual_fraction": 0.49022982008435073
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/reference_mnist_B64_operators.txt"
+    },
+    {
+      "dataset": "mnist",
+      "geometry_batch_size": 64,
+      "implementation": "current",
+      "calibration_seconds": 2.619309208006598,
+      "source_tolerance": 0.04126536883995868,
+      "sampling": {
+        "source_batch_ms": 1.3243387499824166,
+        "target_batch_ms": 0.391667919466272
+      },
+      "stage_ms": {
+        "vae_forward_loss": 47.59006249951199,
+        "geometry_sample": 0.3055583394598216,
+        "geometry_forward": 29.2489749728702,
+        "metrics_transfer": 0.01814275747165084,
+        "backward": 119.20610414235853,
+        "optimizer": 0.9562042774632573,
+        "dual_update": 0.003951051621697843
+      },
+      "epochs": [
+        {
+          "train_seconds": 72.240525332978,
+          "validation_seconds": 6.212329125031829,
+          "train_loss": 170.85883625856445,
+          "validation_loss": 157.56590915693994,
+          "dual_fraction": 0.49022982008435073
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/current_mnist_B64_operators.txt"
+    },
+    {
+      "dataset": "mnist",
+      "geometry_batch_size": 128,
+      "implementation": "reference",
+      "calibration_seconds": 4.007637624978088,
+      "source_tolerance": 0.0451946402026806,
+      "sampling": {
+        "source_batch_ms": 2.5715774996206164,
+        "target_batch_ms": 0.5616558296605945
+      },
+      "stage_ms": {
+        "vae_forward_loss": 46.36900523037184,
+        "geometry_sample": 0.772711492027156,
+        "geometry_forward": 50.957412470597774,
+        "backward": 188.1332145188935,
+        "optimizer": 0.9723260445753112,
+        "dual_update": 0.005885414429940283
+      },
+      "epochs": [
+        {
+          "train_seconds": 104.61929462500848,
+          "validation_seconds": 8.382672792067751,
+          "train_loss": 172.42106937518128,
+          "validation_loss": 158.62138111202822,
+          "dual_fraction": 0.5473631621772073
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/reference_mnist_B128_operators.txt"
+    },
+    {
+      "dataset": "mnist",
+      "geometry_batch_size": 128,
+      "implementation": "current",
+      "calibration_seconds": 4.544924583053216,
+      "source_tolerance": 0.0451946402026806,
+      "sampling": {
+        "source_batch_ms": 3.1762904091738164,
+        "target_batch_ms": 0.5138900002930313
+      },
+      "stage_ms": {
+        "vae_forward_loss": 49.59921565896366,
+        "geometry_sample": 0.3110760299023241,
+        "geometry_forward": 55.40624576678965,
+        "metrics_transfer": 0.02053140487987548,
+        "backward": 153.24878963001538,
+        "optimizer": 1.0762353689642623,
+        "dual_update": 0.004003106732852757
+      },
+      "epochs": [
+        {
+          "train_seconds": 92.81544400006533,
+          "validation_seconds": 7.874434291035868,
+          "train_loss": 172.42106937518128,
+          "validation_loss": 158.62138111202822,
+          "dual_fraction": 0.5473631621772073
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/current_mnist_B128_operators.txt"
+    },
+    {
+      "dataset": "ellipsis",
+      "geometry_batch_size": 64,
+      "implementation": "reference",
+      "calibration_seconds": 0.9688987910049036,
+      "source_tolerance": 0.0019516765878506703,
+      "sampling": {
+        "source_batch_ms": 0.19541333080269396,
+        "target_batch_ms": 0.25212209089659154
+      },
+      "stage_ms": {
+        "vae_forward_loss": 24.238786578644067,
+        "geometry_sample": 0.25252920167986304,
+        "geometry_forward": 14.033569835009985,
+        "backward": 75.44402290659491,
+        "optimizer": 0.5555563140660524,
+        "dual_update": 0.005855230847373605
+      },
+      "epochs": [
+        {
+          "train_seconds": 4.029302875045687,
+          "validation_seconds": 1.401720416964963,
+          "train_loss": 365.080782510659,
+          "validation_loss": 242.99609211092286,
+          "dual_fraction": 0.3100948903622338
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/reference_ellipsis_B64_operators.txt"
+    },
+    {
+      "dataset": "ellipsis",
+      "geometry_batch_size": 64,
+      "implementation": "current",
+      "calibration_seconds": 0.9749348330078647,
+      "source_tolerance": 0.0019516765878506703,
+      "sampling": {
+        "source_batch_ms": 0.043979170732200146,
+        "target_batch_ms": 0.05079832975752652
+      },
+      "stage_ms": {
+        "vae_forward_loss": 24.105377061641775,
+        "geometry_sample": 0.07038857729639858,
+        "geometry_forward": 14.181626081699505,
+        "metrics_transfer": 0.015495851403102279,
+        "backward": 61.42314364842605,
+        "optimizer": 0.6014479731675237,
+        "dual_update": 0.003310432657599449
+      },
+      "epochs": [
+        {
+          "train_seconds": 3.279649749980308,
+          "validation_seconds": 1.0821977080777287,
+          "train_loss": 365.080782510659,
+          "validation_loss": 242.99609211092286,
+          "dual_fraction": 0.3100948903622338
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/current_ellipsis_B64_operators.txt"
+    },
+    {
+      "dataset": "ellipsis",
+      "geometry_batch_size": 128,
+      "implementation": "reference",
+      "calibration_seconds": 1.7901468330528587,
+      "source_tolerance": 0.0019688077190949116,
+      "sampling": {
+        "source_batch_ms": 0.35197040997445583,
+        "target_batch_ms": 0.3680479200556874
+      },
+      "stage_ms": {
+        "vae_forward_loss": 24.484162501175888,
+        "geometry_sample": 0.4584312526276335,
+        "geometry_forward": 26.853562481119297,
+        "backward": 103.3476676500868,
+        "optimizer": 0.5867968633538112,
+        "dual_update": 0.006018645945005119
+      },
+      "epochs": [
+        {
+          "train_seconds": 5.033728750073351,
+          "validation_seconds": 1.9028715830063447,
+          "train_loss": 365.3071591532485,
+          "validation_loss": 243.05689711555408,
+          "dual_fraction": 0.31076486671227027
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/reference_ellipsis_B128_operators.txt"
+    },
+    {
+      "dataset": "ellipsis",
+      "geometry_batch_size": 128,
+      "implementation": "current",
+      "calibration_seconds": 1.7803182499483228,
+      "source_tolerance": 0.0019688077190949116,
+      "sampling": {
+        "source_batch_ms": 0.048266659723594785,
+        "target_batch_ms": 0.0570479198358953
+      },
+      "stage_ms": {
+        "vae_forward_loss": 25.41769060480874,
+        "geometry_sample": 0.08588854689151049,
+        "geometry_forward": 27.866592723876238,
+        "metrics_transfer": 0.01760100421961397,
+        "backward": 76.50701249367557,
+        "optimizer": 0.593426130944863,
+        "dual_update": 0.004016666207462549
+      },
+      "epochs": [
+        {
+          "train_seconds": 4.121238249936141,
+          "validation_seconds": 1.9258951250230893,
+          "train_loss": 365.3071591532485,
+          "validation_loss": 243.05689711555408,
+          "dual_fraction": 0.31076486671227027
+        }
+      ],
+      "operator_profile": "docs/benchmarks/target_geometry_cpu/current_ellipsis_B128_operators.txt"
+    }
+  ]
+}

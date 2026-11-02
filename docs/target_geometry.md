@@ -108,7 +108,8 @@ For orientation only, calibration of the existing checkpoints using B=64,
 | Ellipses | 0.00195168 | 0.0000380 |
 
 These are startup calibration checks, not trained target results. Each actual
-run recalibrates and records its own values. MNIST retains your existing 45°
+run records its calibration, reusing an identical cached calibration on CUDA.
+MNIST retains your existing 45°
 interpolated rotation, for which exact orthogonal-transfer compatibility is
 not assured. Ellipses retain the existing 90° rotation. No target transformation
 is used to canonicalize training images for the regularizer.
@@ -220,3 +221,90 @@ Check that the constraint is active and gradients are useful before expanding
 the sweep. The implementation's tests establish mathematical witnesses and
 gradient plumbing; they do not establish target improvement, arbitrary-domain
 feasibility, escape from exact collapse or rank-8 realizability.
+
+## Performance and equivalence audit
+
+The target-geometry trainer has execution optimizations that preserve its
+objective, sampler and ordinary VAE updates:
+
+- On CPU, geometry batches backed by an ordinary `TensorDataset` (including nested
+  `Subset` views) use indexed tensor gathering. They use the **same CPU randperm
+  calls and generator state** as before. Arbitrary datasets and subclasses with
+  custom `__getitem__` behavior retain their original access path; transforms
+  are not cached or bypassed.
+- Both real-input geometry denominators are the same tensor, computed and
+  checked once. Both output distortions are still computed and checked for
+  finiteness on every geometry batch.
+- The trainer sends its scalar diagnostics to the host in one transfer, rather
+  than separate reads for every loss component and distortion. Accumulation and
+  the bounded dual update retain their original Python-double arithmetic.
+- With a strict maximum, the regularizer's losing decoder branch has exactly
+  zero gradient. The trainer backpropagates through the winning branch and
+  releases the losing diagnostic graph. **Exact ties retain the original
+  `Tensor.max` equal-share subgradient.** The ordinary VAE loss still reaches
+  all adapted encoder and decoder parameters, retaining Adam's ordinary
+  momentum updates even for the decoder whose regularizer view loses.
+- When the dual multiplier is exactly zero, both views are evaluated for
+  monitoring and dual ascent without building an unused geometry autograd
+  graph. The next dual update still uses that batch's measured distortion.
+
+On CUDA, the target-geometry experiment additionally keeps the MNIST/ellipse
+image tensors in GPU memory. VAE minibatches use batched tensor indexing instead
+of per-image Python collation; geometry permutations and gathers also run on
+the GPU. The final partial VAE batch is retained. Held-out source MNIST's plain
+`ToTensor` conversion is vectorized on the GPU. Arbitrary/custom dataset
+transforms keep their original access path. An image-content-keyed cache reuses
+up to 512 MiB of resident image tensors per ablation worker across runs.
+
+Source calibration is cached under `.cache/target_geometry/calibration/` and
+shared across workers with a file lock and atomic publication. Keys include
+the checkpoint contents, held-out images, source config, sampling seed, B,
+calibration count, energy floor, model precision, implementation and execution
+backend. Eta, dual learning rate and view reuse this calibration because they
+do not enter its calculation. Changed source weights/data/B/precision/backend
+force recalibration. No adapted codes, outputs, losses or gradients are cached.
+
+CUDA validation reuses its fixed image bank and checked input Grams/energies,
+recomputes both model views each epoch, and accumulates metrics in device
+float64 before one host transfer. Training combines output-finiteness checks
+with the scalar transfer already needed for the dual update and active-view
+selection. Input-energy checks and fail-before-update behavior are retained.
+The dual update keeps Python-double arithmetic; model precision is unchanged.
+
+CUDA generators retain uniform sampling without replacement and independent
+training/calibration/validation streams. Their seeded sequences differ from
+CPU generators; matched CUDA sweep runs still use the same streams. Existing
+model IDs, completed-run detection, the ordinary LoRA baseline and the original
+regularizer/trainer paths are unchanged. These are execution optimizations,
+not CUDA speedup measurements; no AMP/TF32 policy or mathematical setting is
+changed.
+
+These paths introduce no new mathematical hyperparameters. Precision,
+calibration/validation batch counts, target sampling, source tolerance, eta,
+the dual learning rate and the likelihood/KL objective are unchanged. The
+original transformation regularizer and trainer are not modified.
+
+See [the measured CPU report and raw operator profiles](benchmarks/target_geometry_cpu/README.md).
+The profiling script uses the actual source checkpoints, full target train and
+validation datasets, and writes timing JSON plus PyTorch operator tables.
+It can compare a historical Git implementation with the working tree:
+
+```bash
+python scripts/profile_target_geometry.py --reference-ref 775c21b \
+  --device cpu --threads 4 --steps 40 --epochs 1 \
+  --output /tmp/target_geometry_profile
+```
+
+To audit actual checkpoint-model parameters, gradients, Adam state, losses,
+dual state and geometry sampler state after coupled noisy optimizer steps:
+
+```bash
+python scripts/profile_target_geometry.py --reference-ref 775c21b \
+  --audit-only --audit-steps 5 --output /tmp/target_geometry_equivalence
+```
+
+Run timings on the device where the ablation will train. CPU timings do not
+establish GPU speedups; device-to-host synchronization is especially
+hardware-dependent. The benchmark excludes FID, figure generation and
+TensorBoard/checkpoint I/O from epoch timings, so it isolates training and
+validation rather than claiming an end-to-end ablation duration.

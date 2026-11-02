@@ -1,0 +1,20 @@
+[
+  {
+    "dataset": "mnist",
+    "checkpoint_with_sidecar_median_seconds": 0.00652441696729511,
+    "checkpoint_bytes": 3508491,
+    "thirty_scalars_and_flush_median_seconds": 0.001092666992917657,
+    "image_logging_seconds": 0.03559616697020829,
+    "repetitions": 5,
+    "storage": "local temporary filesystem; no remote filesystem measured"
+  },
+  {
+    "dataset": "ellipsis",
+    "checkpoint_with_sidecar_median_seconds": 0.0028815410332754254,
+    "checkpoint_bytes": 720853,
+    "thirty_scalars_and_flush_median_seconds": 0.0013237500097602606,
+    "image_logging_seconds": 0.01659020793158561,
+    "repetitions": 5,
+    "storage": "local temporary filesystem; no remote filesystem measured"
+  }
+]

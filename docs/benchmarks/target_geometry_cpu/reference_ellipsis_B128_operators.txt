@@ -1,0 +1,30 @@
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                             aten::convolution_backward        55.76%      95.828ms        63.78%     109.600ms       2.962ms            37  
+                      aten::_nnpack_spatial_convolution        22.21%      38.174ms        22.24%      38.221ms       1.593ms            24  
+                                           aten::select         6.98%      11.994ms         8.70%      14.950ms       0.971us         15394  
+                            aten::slow_conv_transpose2d         4.23%       7.270ms         6.46%      11.105ms     740.339us            15  
+                                       aten::as_strided         1.74%       2.992ms         1.74%       2.992ms       0.193us         15503  
+                                            aten::fill_         1.46%       2.507ms         1.46%       2.507ms      53.341us            47  
+autograd::engine::evaluate_function: ConvolutionBack...         1.15%       1.976ms        65.20%     112.043ms       3.028ms            37  
+autograd::engine::evaluate_function: LeakyReluBackwa...         0.81%       1.397ms         1.28%       2.207ms     147.109us            15  
+                                              aten::mul         0.78%       1.334ms         0.85%       1.453ms      23.070us            63  
+                                              aten::add         0.53%     914.543us         0.53%     914.543us      35.175us            26  
+                                               aten::mm         0.52%     887.755us         0.52%     892.588us      19.835us            45  
+                                             aten::add_         0.50%     853.633us         0.53%     917.717us      11.192us            82  
+                              aten::leaky_relu_backward         0.46%     782.338us         0.46%     782.338us      52.156us            15  
+                                       aten::leaky_relu         0.45%     778.044us         0.45%     778.044us      51.870us            15  
+                               Optimizer.step#Adam.step         0.19%     328.759us         0.45%     771.086us     771.086us             1  
+                                            aten::addmm         0.17%     284.210us         0.22%     370.586us      52.941us             7  
+                              aten::log_sigmoid_forward         0.14%     246.127us         0.15%     251.459us     125.729us             2  
+                                              aten::sum         0.10%     165.047us         0.10%     174.836us      13.449us            13  
+                                            aten::copy_         0.09%     146.716us         0.09%     146.716us       0.991us           148  
+                                      aten::convolution         0.08%     143.916us        28.85%      49.581ms       1.271ms            39  
+                                         aten::_to_copy         0.07%     122.730us         0.15%     250.453us       1.815us           138  
+                                     aten::_convolution         0.06%     108.785us        28.77%      49.437ms       1.268ms            39  
+      autograd::engine::evaluate_function: MulBackward0         0.06%     103.334us         0.39%     664.880us      27.703us            24  
+                                          aten::sigmoid         0.06%     101.208us         0.06%     101.208us      50.604us             2  
+                                   ConvolutionBackward0         0.06%     100.464us        63.83%     109.700ms       2.965ms            37  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 171.850ms

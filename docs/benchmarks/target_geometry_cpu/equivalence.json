@@ -1,0 +1,62 @@
+[
+  {
+    "dataset": "mnist",
+    "geometry_batch_size": 64,
+    "optimizer_steps": 5,
+    "max_abs_errors": {
+      "parameters": 0.0,
+      "gradients": 0.0,
+      "adam_state": 0.0
+    },
+    "loss_abs_error": 0.0,
+    "metric_max_abs_error": 0.0,
+    "source_tolerance_exact": true,
+    "dual_exact": true,
+    "sampler_state_exact": true
+  },
+  {
+    "dataset": "mnist",
+    "geometry_batch_size": 128,
+    "optimizer_steps": 5,
+    "max_abs_errors": {
+      "parameters": 0.0,
+      "gradients": 0.0,
+      "adam_state": 0.0
+    },
+    "loss_abs_error": 0.0,
+    "metric_max_abs_error": 0.0,
+    "source_tolerance_exact": true,
+    "dual_exact": true,
+    "sampler_state_exact": true
+  },
+  {
+    "dataset": "ellipsis",
+    "geometry_batch_size": 64,
+    "optimizer_steps": 5,
+    "max_abs_errors": {
+      "parameters": 0.0,
+      "gradients": 0.0,
+      "adam_state": 0.0
+    },
+    "loss_abs_error": 0.0,
+    "metric_max_abs_error": 0.0,
+    "source_tolerance_exact": true,
+    "dual_exact": true,
+    "sampler_state_exact": true
+  },
+  {
+    "dataset": "ellipsis",
+    "geometry_batch_size": 128,
+    "optimizer_steps": 5,
+    "max_abs_errors": {
+      "parameters": 0.0,
+      "gradients": 0.0,
+      "adam_state": 0.0
+    },
+    "loss_abs_error": 0.0,
+    "metric_max_abs_error": 0.0,
+    "source_tolerance_exact": true,
+    "dual_exact": true,
+    "sampler_state_exact": true
+  }
+]

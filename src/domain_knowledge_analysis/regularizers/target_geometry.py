@@ -14,6 +14,7 @@ import math
 import warnings
 
 import torch
+from torch.utils.data import Subset, TensorDataset
 
 from domain_knowledge_analysis.adapters.lora import LoRA
 
@@ -28,7 +29,8 @@ class GeometryBatchSampler:
     """Independent uniform batches, distinct images within each batch.
 
     Calibration, target training and validation use this same sampling rule and
-    batch size, with independent CPU generators. No class labels are consulted.
+    batch size, with independent generators on the image-storage device. No
+    class labels are consulted. CPU datasets retain their original RNG stream.
     """
 
     def __init__(self, dataset, batch_size, seed):
@@ -36,10 +38,35 @@ class GeometryBatchSampler:
         self.batch_size = positive_integer(batch_size, "geometry_batch_size", 2)
         if len(dataset) < batch_size:
             raise ValueError("Geometry dataset must contain at least geometry_batch_size images.")
-        self.generator = torch.Generator().manual_seed(seed)
+        self._images, self._indices = self._tensor_storage(dataset)
+        self.sampling_device = self._images.device if self._images is not None else torch.device("cpu")
+        self.generator = torch.Generator(device=self.sampling_device).manual_seed(seed)
+        if self._indices is not None:
+            self._indices = self._indices.to(self.sampling_device)
+
+    @staticmethod
+    def _tensor_storage(dataset):
+        """Use existing tensor storage; don't cache or bypass arbitrary transforms."""
+        indices = None
+        while type(dataset) is Subset:
+            subset_indices = torch.as_tensor(dataset.indices, dtype=torch.long)
+            indices = subset_indices if indices is None else subset_indices[indices]
+            dataset = dataset.dataset
+        if type(dataset) is TensorDataset:
+            if indices is not None:
+                # Subset permits ordinary negative tensor indices; index_select
+                # requires their nonnegative equivalents. Invalid indices still fail.
+                indices = torch.where(indices < 0, indices + len(dataset), indices)
+            return dataset.tensors[0], indices
+        return None, None
 
     def sample(self, device):
-        indices = torch.randperm(len(self.dataset), generator=self.generator)[:self.batch_size]
+        indices = torch.randperm(len(self.dataset), generator=self.generator,
+                                 device=self.sampling_device)[:self.batch_size]
+        if self._images is not None:
+            if self._indices is not None:
+                indices = self._indices[indices]
+            return self._images.index_select(0, indices.to(self._images.device)).to(device)
         return torch.stack([self.dataset[int(index)][0] for index in indices]).to(device)
 
 
@@ -54,19 +81,30 @@ def centered_gram(images):
     return centered @ centered.T
 
 
+def input_gram_energy(input_gram, energy_floor=1e-12):
+    energy = input_gram.square().sum()
+    # Finite positive squared energy also implies every Gram entry is finite.
+    # Combine predicates before the single host read (important on accelerators).
+    if not (torch.isfinite(energy) & (energy > energy_floor)):
+        raise ValueError("Input Gram energy is nonfinite or near zero; reject this geometry batch.")
+    return energy
+
+
+def _distortion(input_gram, energy, output_images):
+    output_gram = centered_gram(output_images)
+    if output_gram.shape != input_gram.shape:
+        raise ValueError("Input and output geometry must use the same batch members.")
+    return (output_gram - input_gram).square().sum() / energy
+
+
 def geometry_distortion(input_gram, output_images, energy_floor=1e-12):
     """||G(output)-G(input)||_F^2 / ||G(input)||_F^2.
 
     Reject degenerate input geometry rather than changing its denominator.
     There is no output trace, dimension, batch-size or response normalization.
     """
-    energy = input_gram.square().sum()
-    if not torch.isfinite(input_gram).all() or not torch.isfinite(energy) or energy <= energy_floor:
-        raise ValueError("Input Gram energy is nonfinite or near zero; reject this geometry batch.")
-    output_gram = centered_gram(output_images)
-    if output_gram.shape != input_gram.shape:
-        raise ValueError("Input and output geometry must use the same batch members.")
-    distortion = (output_gram - input_gram).square().sum() / energy
+    energy = input_gram_energy(input_gram, energy_floor)
+    distortion = _distortion(input_gram, energy, output_images)
     if not torch.isfinite(distortion):
         raise ValueError("Nonfinite target geometry distortion.")
     return distortion
@@ -85,7 +123,8 @@ class TargetGeometryRegularizer:
     VALID_VIEWS = {"full", "target_only", "source_only"}
 
     def __init__(self, model, source_batches, calibration_batches=128, eta=100.0,
-                 dual_learning_rate=0.01, view="full", energy_floor=1e-12):
+                 dual_learning_rate=0.01, view="full", energy_floor=1e-12,
+                 calibration=None):
         positive_integer(calibration_batches, "calibration_batches", 2)
         for value, name in ((eta, "eta"), (dual_learning_rate, "dual_learning_rate"),
                             (energy_floor, "energy_floor")):
@@ -114,47 +153,65 @@ class TargetGeometryRegularizer:
         source.eval()
         self.source_decoder = source.decoder
 
-        distortions = []
-        with torch.no_grad():
-            for _ in range(calibration_batches):
-                images = source_batches.sample(self.device)
-                codes, _ = source.encoder(images)
-                outputs = image_mean(source.decoder, codes, self.distribution)
-                distortions.append(geometry_distortion(centered_gram(images), outputs, self.energy_floor).item())
-        values = torch.tensor(distortions, dtype=torch.float64)
-        self.source_tolerance = values.mean().item()
-        self.calibration = {
-            "source_tolerance": self.source_tolerance,
-            "standard_error": (values.std(unbiased=True) / math.sqrt(calibration_batches)).item(),
-            "batch_distortion_std": values.std(unbiased=True).item(),
-            "min": values.min().item(),
-            "max": values.max().item(),
-            "calibration_batches": calibration_batches,
-            "geometry_batch_size": source_batches.batch_size,
-            "sampler": "independent uniform batches without replacement within each batch",
-        }
+        if calibration is None:
+            distortions = []
+            with torch.no_grad():
+                for _ in range(calibration_batches):
+                    images = source_batches.sample(self.device)
+                    codes, _ = source.encoder(images)
+                    outputs = image_mean(source.decoder, codes, self.distribution)
+                    distortions.append(geometry_distortion(centered_gram(images), outputs, self.energy_floor))
+            # Keep results on their device during calibration, then transfer once.
+            # Float64 CPU reduction preserves the original tolerance arithmetic.
+            values = torch.stack(distortions).cpu().double()
+            calibration = {
+                "source_tolerance": values.mean().item(),
+                "standard_error": (values.std(unbiased=True) / math.sqrt(calibration_batches)).item(),
+                "batch_distortion_std": values.std(unbiased=True).item(),
+                "min": values.min().item(),
+                "max": values.max().item(),
+                "calibration_batches": calibration_batches,
+                "geometry_batch_size": source_batches.batch_size,
+                "sampler": "independent uniform batches without replacement within each batch",
+            }
+        if (calibration["calibration_batches"] != calibration_batches
+                or calibration["geometry_batch_size"] != source_batches.batch_size
+                or any(not math.isfinite(calibration[key]) or calibration[key] < 0
+                       for key in ("source_tolerance", "standard_error", "batch_distortion_std", "min", "max"))):
+            raise ValueError("Invalid or incompatible cached source calibration.")
+        self.calibration = dict(calibration)
+        self.source_tolerance = self.calibration["source_tolerance"]
         if self.source_tolerance >= 1:
             raise ValueError(f"Uninformative source tolerance c_s={self.source_tolerance:.6g} >= 1; collapse would satisfy it.")
         if self.source_tolerance + 2 * self.calibration["standard_error"] >= 1 or self.source_tolerance >= 0.9:
             warnings.warn("Source tolerance is close to collapse distortion 1; inspect calibration before sweeping.", stacklevel=2)
 
-    def distortions(self, images):
+    def distortions(self, images, input_geometry=None, check_finite=True):
         # Deterministic posterior mean, with gradients to the adapted encoder.
         # Restore every module's mode even if the geometry check raises.
         modes = [(module, module.training) for module in self.model.modules()]
         self.model.eval()
         try:
             codes, _ = self.model.encoder(images)
-            gram = centered_gram(images.detach())
+            if input_geometry is None:
+                gram = centered_gram(images.detach())
+                energy = input_gram_energy(gram, self.energy_floor)
+            else:
+                # The trainer caches only validated, detached REAL input geometry.
+                # Model outputs/codes must always be recomputed with current weights.
+                gram, energy = input_geometry
             result = {}
             if self.view != "source_only":
                 outputs = image_mean(self.model.decoder, codes, self.distribution)
-                result["target_distortion"] = geometry_distortion(gram, outputs, self.energy_floor)
+                result["target_distortion"] = _distortion(gram, energy, outputs)
             if self.view != "target_only":
                 # D0 parameters are frozen; deliberately DO NOT use no_grad here.
                 outputs = image_mean(self.source_decoder, codes, self.distribution)
-                result["source_chart_distortion"] = geometry_distortion(gram, outputs, self.energy_floor)
-            result["worst_distortion"] = torch.stack(list(result.values())).max()
+                result["source_chart_distortion"] = _distortion(gram, energy, outputs)
+            stacked = torch.stack(list(result.values()))
+            if check_finite and not torch.isfinite(stacked).all():
+                raise ValueError("Nonfinite target geometry distortion.")
+            result["worst_distortion"] = stacked.max()
             return result
         finally:
             for module, training in modes:
@@ -170,7 +227,8 @@ class TargetGeometryRegularizer:
     def update_dual(self, worst_distortion):
         # Normalized dual coordinate q=lambda/eta: lambda's ascent step size
         # is eta*dual_learning_rate. The sample violation is unbiased for E a-c_s.
-        violation = float(worst_distortion.detach()) - self.source_tolerance
+        value = worst_distortion.detach() if isinstance(worst_distortion, torch.Tensor) else worst_distortion
+        violation = float(value) - self.source_tolerance
         self.dual_fraction = min(1.0, max(0.0, self.dual_fraction + self.dual_learning_rate * violation))
 
     def penalty(self, mean_worst_distortion):

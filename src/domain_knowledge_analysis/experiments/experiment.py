@@ -126,6 +126,13 @@ class Experiment():
             config=self.config,
             transformation_config=self.config["lora"]["transformed_dataset"],
         )
+        regularizer_config = self.config["lora"]["regularizer"]
+        if (regularizer_config is not None and regularizer_config.get("mode") == "target_geometry"
+                and self.device.type == "cuda"):
+            from domain_knowledge_analysis.utils.target_geometry_runtime import cuda_target_loaders
+
+            train_dataloader, validation_dataloader = cuda_target_loaders(
+                (train_dataloader, validation_dataloader), self.config, self.device)
 
         optimizer = utils.create_optimizer(self.config, self.lora_manager.trainable_parameters())
 
