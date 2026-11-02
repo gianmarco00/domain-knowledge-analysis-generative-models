@@ -231,7 +231,8 @@ def test_score_split_computes_target_gain_and_source_degradation(monkeypatch):
     assert metrics["source_degradation"] == pytest.approx(0.03)
 
 
-def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, monkeypatch):
+@pytest.mark.parametrize("tensor_storage", [True, False])
+def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, monkeypatch, tensor_storage):
     from torchmetrics.image import fid as fid_module
 
     class FakeFID:
@@ -282,7 +283,15 @@ def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, m
 
     monkeypatch.setattr(fid_module, "FrechetInceptionDistance", FakeFID)
     images = torch.arange(20, dtype=torch.float32).reshape(5, 1, 2, 2) / 20
-    dataloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(images, torch.zeros(5)), batch_size=2)
+    class DirectDataset(torch.utils.data.Dataset):
+        def __len__(self):
+            return len(images)
+
+        def __getitem__(self, index):
+            return images[index], 0
+
+    dataset = torch.utils.data.TensorDataset(images, torch.zeros(5)) if tensor_storage else DirectDataset()
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=2)
     manager = FakeLoRAManager()
     model = FakeModel(manager)
     experiment = type("Experiment", (), {"model": model, "lora_manager": manager, "device": torch.device("cpu")})()
@@ -293,6 +302,8 @@ def test_fid_uses_target_test_images_and_prior_samples_with_adapters(tmp_path, m
     ablation.fid_reference_key = None
 
     reference_key, fid_key = ablation.prepare_fid(dataloader)
+    equivalent_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(images), batch_size=2)
+    assert ablation.prepare_fid(equivalent_loader) == (reference_key, fid_key)
     legacy_fid_key = ablation.legacy_fid_key
     assert legacy_fid_key is not None
     assert ablation.score_fid(experiment, dataloader, reference_key) == 12.5

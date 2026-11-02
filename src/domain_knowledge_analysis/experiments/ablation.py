@@ -328,7 +328,18 @@ class Ablation:
             self.fid_weights_hash = weights_hash.hexdigest()
             self.fid.to(device)
 
-        images = target_dataloader.dataset.tensors[0].contiguous()
+        dataset = target_dataloader.dataset
+        if isinstance(dataset, torch.utils.data.TensorDataset):
+            images = dataset.tensors[0]
+        else:
+            # Direct targets such as EMNIST are ordinary torchvision datasets.
+            # Hash their preprocessed images in the same order used for FID.
+            batches = torch.utils.data.DataLoader(
+                dataset, batch_size=int(self.ablation_config["fid_batch_size"]),
+                shuffle=False, num_workers=0,
+            )
+            images = torch.cat([batch[0] for batch in batches])
+        images = images.contiguous()
         reference_hash = sha256(images.numpy().tobytes())
         # Plotting and training changes do not affect generated-image FID. Fingerprint
         # the scoring path, latent sampling, model and adapter implementations instead.

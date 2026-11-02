@@ -44,6 +44,18 @@ TRANSFORMATION_IMPLEMENTATION_VERSION = 5
 TRANSFORMED_DATASET_CACHE_VERSION = 5
 LINES_DATASET_VERSION = 2
 ELLIPSIS_DATASET_VERSION = 7
+EMNIST_DATASET_VERSION = 1
+
+# Alphabetical order defines the experiment's stable, zero-based class labels.
+# Digit resemblance is a visual heuristic; the Letters split mixes letter case.
+EMNIST_LETTERS = ("B", "G", "I", "L", "O", "Q", "S", "T", "Y", "Z")
+
+
+class CorrectEMNISTOrientation:
+    """Transpose EMNIST's stored axes to show upright, unmirrored characters."""
+
+    def __call__(self, image):
+        return image.transpose(-2, -1).contiguous()
 
 
 def affine_sample(image, theta):
@@ -531,6 +543,13 @@ def create_dataset(config, dataset_name, train):
             transform=create_transform(dataset_name),
         )
 
+    elif dataset_name == "emnist":
+        dataset = create_emnist_dataset(
+            dataset_dir=dataset_dir,
+            train=train,
+            transform=create_transform(dataset_name),
+        )
+
     elif dataset_name in MEDMNIST_DATASETS:
         dataset = create_medmnist_dataset(
             dataset_name=dataset_name,
@@ -594,18 +613,53 @@ def create_train_validation_datasets(config, dataset_name):
     return train_dataset, validation_dataset
 
 
-def create_training_dataloaders(config, transformation_config=None):
+def resolve_target_dataset(config, target_config):
+    """Resolve the legacy LoRA target block without changing the source config.
 
-    dataset_name = config["dataset"]["name"].lower()
+    A registered dataset name selects that dataset directly, even when old
+    transformation fields remain in the YAML. Other names (e.g. rotated_mnist)
+    retain the existing source-transformation behavior.
+    """
+    source_name = config["dataset"]["name"].lower()
+    if target_config is None:
+        return config, source_name, None
+
+    target_name = target_config.get("name", "").lower()
+    target_name = DATASET_ALIASES.get(target_name, target_name)
+    supported_datasets = set(TORCHVISION_DATASETS) | MEDMNIST_DATASETS | {
+        "emnist", "lines_dataset", "vertical_lines_dataset", "ellipsis_dataset",
+    }
+    if target_name in supported_datasets:
+        dataset_config = {**config["dataset"], "name": target_name}
+        dataset_config.update({
+            key: target_config[key]
+            for key in ("train", "train_split", "shape") if key in target_config
+        })
+        if tuple(dataset_config["shape"]) != tuple(config["dataset"]["shape"]):
+            raise ValueError("The target dataset shape must match the source model's input shape.")
+        return {**config, "dataset": dataset_config}, target_name, None
+
+    if "type" not in target_config or "intensity" not in target_config:
+        raise ValueError(
+            f"Unknown target dataset: {target_name!r}. Select a supported dataset "
+            "or supply type and intensity for a transformed source dataset."
+        )
+    return config, source_name, target_config
+
+
+def create_training_dataloaders(config, transformation_config=None):
+    dataset_config, dataset_name, transformation_config = resolve_target_dataset(
+        config, transformation_config,
+    )
 
     if transformation_config is None:
         train_dataset, validation_dataset = create_train_validation_datasets(
-            config=config,
+            config=dataset_config,
             dataset_name=dataset_name,
         )
     else:
         train_dataset, validation_dataset = create_transformed_datasets(
-            config=config,
+            config=dataset_config,
             dataset_name=dataset_name,
             transformation_config=transformation_config,
         )
@@ -630,17 +684,19 @@ def create_training_dataloaders(config, transformation_config=None):
 
 
 def create_testing_dataloaders(config, transformation_config=None):
-    dataset_name = config["dataset"]["name"].lower()
+    dataset_config, dataset_name, transformation_config = resolve_target_dataset(
+        config, transformation_config,
+    )
 
     if transformation_config is None:
         test_dataset = create_dataset(
-            config=config,
+            config=dataset_config,
             dataset_name=dataset_name,
             train=False,
         )
     else:
         test_dataset = create_transformed_datasets(
-            config=config,
+            config=dataset_config,
             dataset_name=dataset_name,
             transformation_config=transformation_config,
             split="test",
@@ -698,6 +754,8 @@ def create_transformed_datasets(
         cache_version += f"_lines_{LINES_DATASET_VERSION}"
     elif dataset_name == "ellipsis_dataset":
         cache_version += f"_ellipsis_{ELLIPSIS_DATASET_VERSION}"
+    elif dataset_name == "emnist":
+        cache_version += f"_emnist_{EMNIST_DATASET_VERSION}"
 
     cache_dir = (
         dataset_dir
@@ -891,6 +949,12 @@ def create_calibration_dataloader(config, dataset_name):
 
 
 def create_transform(dataset_name):
+    if dataset_name == "emnist":
+        return transforms.Compose([
+            transforms.ToTensor(),
+            CorrectEMNISTOrientation(),
+        ])
+
     supported_datasets = (
         set(TORCHVISION_DATASETS)
         | MEDMNIST_DATASETS
@@ -1014,6 +1078,33 @@ def create_torchvision_dataset(
         download=download_needed,
         transform=transform,
     )
+
+
+def create_emnist_dataset(dataset_dir, train, transform):
+    """Keep ten digit-like EMNIST Letters classes and relabel them from 0 to 9.
+
+    The official train/test split is preserved. Uppercase and lowercase variants
+    share a class; the full selected pools contain 48,000/8,000 images.
+    """
+    dataset = datasets.EMNIST(
+        root=dataset_dir,
+        split="letters",
+        train=train,
+        download=True,
+        transform=transform,
+    )
+
+    # EMNIST Letters uses 1=A, ..., 26=Z, rather than zero-based labels.
+    label_map = torch.full((27,), -1, dtype=torch.long)
+    for label, letter in enumerate(EMNIST_LETTERS):
+        label_map[ord(letter) - ord("A") + 1] = label
+    targets = label_map[dataset.targets]
+    selected = targets >= 0
+    dataset.data = dataset.data[selected]
+    dataset.targets = targets[selected]
+    dataset.classes = list(EMNIST_LETTERS)
+    return dataset
+
 
 def create_medmnist_dataset(
     dataset_name,

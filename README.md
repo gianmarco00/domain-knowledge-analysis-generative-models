@@ -1,5 +1,53 @@
 # Domain Knowledge Analysis for Generative Models
 
+## EMNIST subset for MNIST transfer
+
+Use `utils.create_dataset(config, "emnist", train=True)` or set
+`dataset.name: emnist` for the existing training, testing and scoring loaders.
+This selects **B, G, I, L, O, Q, S, T, Y, Z** from the
+[EMNIST Letters split](https://www.nist.gov/itl/products-and-services/emnist-dataset),
+which combines uppercase and lowercase handwriting. The selection favors
+digit-like loops and strokes; resemblance depends on handwriting style.
+Labels `0–9` follow that alphabetical order and identify letters, not digits.
+Images are upright, unmirrored `float32` tensors of shape `[1, 28, 28]` in
+`[0, 1]`, with the same optional continuous Bernoulli dequantization as MNIST.
+
+The subset contains 48,000 training-pool images (4,800 per letter) and 8,000
+official test images (800 per letter). The default seeded 80/20 split yields
+38,400 training and 9,600 validation examples. The first load downloads the
+full official EMNIST archive through torchvision; subsequent loads reuse it.
+Open [the visualization notebook](notebooks/visualize_emnist_dataset.ipynb)
+for class counts, multiple samples per letter, and a MNIST comparison.
+
+For MNIST-to-EMNIST LoRA, keep the top-level `dataset.name: mnist` as the
+source and select the target in the existing LoRA block:
+
+```yaml
+lora:
+  transformed_dataset:
+    name: emnist
+    train_split: 0.8
+    shape: [1, 28, 28]
+```
+
+[The EMNIST LoRA configuration](config/lora_vae_mnist_emnist.yaml) provides a
+complete example with the same source checkpoint, architecture, LoRA settings
+and regularizer as `lora_vae_mnist.yaml`. Registered dataset names select the
+dataset directly for target training, validation, test scoring and FID. Old
+`type`/`intensity` fields are ignored when a registered dataset is selected, so
+changing the target name to `emnist` cannot accidentally rotate MNIST or EMNIST.
+Target split settings apply without changing the source dataset or anchors.
+
+Existing transformed targets retain their configured transformation and cache:
+
+```yaml
+lora:
+  transformed_dataset:
+    name: rotated_mnist
+    type: rotation
+    intensity: 45.0
+```
+
 ## Target geometry regularizer
 
 The new, separate `target_geometry` regularizer uses real target batches and a
