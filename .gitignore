@@ -14,4 +14,4 @@ dist/
 *.bash_history
 datasets/transformed/
 datasets/EMNIST/
-ablations/**/models/
+ablations/**/models/**/*.pt

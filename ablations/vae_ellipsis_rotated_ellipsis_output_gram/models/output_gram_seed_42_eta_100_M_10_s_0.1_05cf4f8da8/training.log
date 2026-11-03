@@ -1,0 +1,34 @@
+Training: output_gram_seed_42_eta_100_M_10_s_0.1_05cf4f8da8
+Using device: cuda
+horizontal_translation: intensity=0.257814, RMS=0.0368607, per-anchor RMS min/median/max=0.0329746/0.0368271/0.0406842
+vertical_translation: intensity=0.173336, RMS=0.0434185, per-anchor RMS min/median/max=0.0411763/0.043168/0.0475981
+isotropic_scale: intensity=1.0345, RMS=0.0646441, per-anchor RMS min/median/max=0.055676/0.0641688/0.0776368
+aspect_ratio_deformation: intensity=1.02774, RMS=0.039595, per-anchor RMS min/median/max=0.033847/0.0395438/0.0483487
+diagonal_shear: intensity=0.108516, RMS=0.0359938, per-anchor RMS min/median/max=0.029517/0.0358337/0.0433775
+vertical_shear: intensity=0.0298816, RMS=0.0415815, per-anchor RMS min/median/max=0.0344194/0.0413169/0.0486122
+stroke_thickness: intensity=0.0996094, RMS=0.0321927, per-anchor RMS min/median/max=0.0304972/0.0321543/0.0352272
+gaussian_blur: intensity=0.45263, RMS=0.029568, per-anchor RMS min/median/max=0.025887/0.0293423/0.0348866
+rotation: intensity=1.86768, RMS=0.0403483, per-anchor RMS min/median/max=0.0334152/0.0403079/0.0475991
+horizontal_wave: intensity=0.554372, RMS=0.036885, per-anchor RMS min/median/max=0.0306792/0.0367271/0.0438773
+
+TensorBoard logs:
+  Current run: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_output_gram/models/output_gram_seed_42_eta_100_M_10_s_0.1_05cf4f8da8
+  All runs:    /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_output_gram/models
+
+In a second Clara terminal, attach to the Docker container:
+  cd /media/m2/Gianmarco_workspace/Generative_models/domain-knowledge-analysis-generative-models
+  ./torch_docker_up.sh
+
+Inside the container, run TensorBoard:
+  tensorboard --logdir /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_output_gram/models --bind_all --port 6006
+
+From your Mac, open an SSH tunnel and keep it running:
+  ssh -N -L 16006:localhost:6006 horao@100.126.131.115
+
+Then open on your Mac:
+  http://localhost:16006
+
+If the browser says connection refused, recreate the Docker container once:
+  ./torch_docker_down.sh
+  ./torch_docker_up.sh
+

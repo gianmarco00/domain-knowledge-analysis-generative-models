@@ -1,0 +1,12 @@
+source_tolerance: 0.0019426019798629568
+standard_error: 3.332133459959441e-05
+batch_distortion_std: 0.0003769878664569463
+min: 0.001229878282174468
+max: 0.00328400288708508
+calibration_batches: 128
+geometry_batch_size: 64
+sampler: independent uniform batches without replacement within each batch
+source_split_seed: 42
+calibration_seed: 17043
+source_checkpoint: runs/vae_ellipsis_source_2/checkpoints/best.pt
+tolerance_rule: measured mean; no added slack or uncertainty inflation

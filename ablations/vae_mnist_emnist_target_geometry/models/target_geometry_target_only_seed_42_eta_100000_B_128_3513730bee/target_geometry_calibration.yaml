@@ -1,0 +1,12 @@
+source_tolerance: 0.044945363770239055
+standard_error: 0.00043448784834313066
+batch_distortion_std: 0.00491566886250528
+min: 0.03502768650650978
+max: 0.05854588374495506
+calibration_batches: 128
+geometry_batch_size: 128
+sampler: independent uniform batches without replacement within each batch
+source_split_seed: 42
+calibration_seed: 17043
+source_checkpoint: runs/vae_mnist_lr_0.001_29_jul_1606_B_beta_1.7_LD_16/checkpoints/best.pt
+tolerance_rule: measured mean; no added slack or uncertainty inflation

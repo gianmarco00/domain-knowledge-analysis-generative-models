@@ -1,0 +1,44 @@
+Training: output_gram_seed_42_eta_1000_M_20_s_0.1_84a18cd15c
+Using device: cuda
+horizontal_translation: intensity=0.323747, RMS=0.0353424, per-anchor RMS min/median/max=0.0248699/0.0350019/0.0463856
+vertical_translation: intensity=0.214839, RMS=0.0406487, per-anchor RMS min/median/max=0.0264693/0.0396442/0.0544899
+isotropic_scale: intensity=1.03407, RMS=0.0523591, per-anchor RMS min/median/max=0.0197917/0.0503019/0.0864387
+aspect_ratio_deformation: intensity=1.0255, RMS=0.0334421, per-anchor RMS min/median/max=0.01096/0.0317093/0.0566286
+diagonal_shear: intensity=0.0498047, RMS=0.0299711, per-anchor RMS min/median/max=0.00572657/0.0252344/0.0565347
+vertical_shear: intensity=0.0361328, RMS=0.0353758, per-anchor RMS min/median/max=0.0136246/0.0355299/0.0513101
+stroke_thickness: intensity=0.0996094, RMS=0.024601, per-anchor RMS min/median/max=0.0174521/0.0240931/0.0324667
+gaussian_blur: intensity=0.470206, RMS=0.026613, per-anchor RMS min/median/max=0.0164609/0.0261952/0.0409749
+rotation: intensity=2.19727, RMS=0.0403708, per-anchor RMS min/median/max=0.013156/0.039894/0.0606178
+horizontal_wave: intensity=0.406863, RMS=0.0329821, per-anchor RMS min/median/max=0.0101226/0.0319292/0.0521387
+vertical_wave: intensity=0.271012, RMS=0.0368533, per-anchor RMS min/median/max=0.0200324/0.0360871/0.0519261
+perspective: intensity=0.0525949, RMS=0.0173117, per-anchor RMS min/median/max=0.00172891/0.0142355/0.0375015
+vertical_perspective: intensity=0.0507812, RMS=0.0210188, per-anchor RMS min/median/max=0.00288904/0.0173612/0.0414608
+swirl: intensity=0.0107855, RMS=0.0393235, per-anchor RMS min/median/max=0.0178474/0.0383892/0.0537756
+radial_bulge: intensity=0.0507812, RMS=0.0386738, per-anchor RMS min/median/max=0.0210268/0.0373581/0.0561029
+vignette: intensity=0.0996094, RMS=0.0125977, per-anchor RMS min/median/max=0.00338648/0.0116951/0.0220534
+contrast: intensity=1.10828, RMS=0.0128972, per-anchor RMS min/median/max=0.00838034/0.0126962/0.0187487
+gamma_correction: intensity=1.25341, RMS=0.0160531, per-anchor RMS min/median/max=0.00962615/0.015668/0.0221251
+binarization: intensity=0.0996094, RMS=0.00748701, per-anchor RMS min/median/max=0.00411446/0.00740238/0.0105721
+sharpen: intensity=0.0996094, RMS=0.00338501, per-anchor RMS min/median/max=0.00175262/0.00329604/0.00611605
+
+TensorBoard logs:
+  Current run: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram/models/output_gram_seed_42_eta_1000_M_20_s_0.1_84a18cd15c
+  All runs:    /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram/models
+
+In a second Clara terminal, attach to the Docker container:
+  cd /media/m2/Gianmarco_workspace/Generative_models/domain-knowledge-analysis-generative-models
+  ./torch_docker_up.sh
+
+Inside the container, run TensorBoard:
+  tensorboard --logdir /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_ellipsis_rotated_ellipsis_joint_gram/models --bind_all --port 6006
+
+From your Mac, open an SSH tunnel and keep it running:
+  ssh -N -L 16006:localhost:6006 horao@100.126.131.115
+
+Then open on your Mac:
+  http://localhost:16006
+
+If the browser says connection refused, recreate the Docker container once:
+  ./torch_docker_down.sh
+  ./torch_docker_up.sh
+
