@@ -1,0 +1,98 @@
+selection_rules:
+  full_reconstruction: minimum validation target MSE; ties prefer lower test FID
+  target_only_reconstruction: maximum equal-weight mean of same-seed LoRA-relative
+    test target MSE and FID improvements; ties prefer lower FID
+  full_generation: minimum test target FID among full models; ties prefer lower test
+    target MSE
+  target_only_generation: minimum test target FID among target-only models; ties prefer
+    lower test target MSE
+target_only_balanced_improvement_percent: 5.819803154072321
+models:
+  full_reconstruction:
+    model_id: 7d70a582da
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_emnist_target_geometry/models/target_geometry_full_seed_42_eta_1_B_64_7d70a582da
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_emnist_target_geometry/models/target_geometry_full_seed_42_eta_1_B_64_7d70a582da/config.yaml
+    seed: 42
+    eta: 1.0
+    mode: target_geometry
+    view: full
+    geometry_batch_size: 64
+    dual_learning_rate: 0.1
+    validation_base_target_mse: 0.04117026135325432
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.0110381102313598
+    validation_adapted_source_mse: 0.021467636982599896
+    validation_target_gain: 0.03013215112189452
+    validation_source_degradation: 0.013639333665370942
+    test_base_target_mse: 0.04139411936700344
+    test_base_source_mse: 0.007944586424529552
+    test_adapted_target_mse: 0.011074868105351925
+    test_adapted_source_mse: 0.021097252598404885
+    test_target_gain: 0.03031925126165152
+    test_source_degradation: 0.013152666173875333
+    test_target_fid: 22.58635139465332
+    fid_seed: 123
+    checkpoint_hash: 68521868657240909f5b6081ef7203299378d72e030049c5d1031699f31c8c31
+    fid_key: 55b03bb050115eac16c618532b0f0864d2560f3f7ba1ddc238a7b9a45113f0b6
+    source_tolerance: 0.041664074087748304
+    calibration_standard_error: 0.0004998143737435891
+    dual_multiplier: 1.0
+  target_only_reconstruction: &id001
+    model_id: cb7e74907c
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_emnist_target_geometry/models/target_geometry_target_only_seed_42_eta_1000_B_32_cb7e74907c
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_emnist_target_geometry/models/target_geometry_target_only_seed_42_eta_1000_B_32_cb7e74907c/config.yaml
+    seed: 42
+    eta: 1000.0
+    mode: target_geometry
+    view: target_only
+    geometry_batch_size: 32
+    dual_learning_rate: 0.001
+    validation_base_target_mse: 0.04117026135325432
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.0103499348834157
+    validation_adapted_source_mse: 0.01915207552909851
+    validation_target_gain: 0.03082032646983862
+    validation_source_degradation: 0.011323772211869556
+    test_base_target_mse: 0.04139411936700344
+    test_base_source_mse: 0.007944586424529552
+    test_adapted_target_mse: 0.010406005814671517
+    test_adapted_source_mse: 0.01883227773308754
+    test_target_gain: 0.030988113552331924
+    test_source_degradation: 0.010887691308557988
+    test_target_fid: 21.440040588378906
+    fid_seed: 123
+    checkpoint_hash: 408d8cc5f3c05b52b566e575101e6f2ca9335e0bc1968ef0051069d99544c99e
+    fid_key: 55b03bb050115eac16c618532b0f0864d2560f3f7ba1ddc238a7b9a45113f0b6
+    source_tolerance: 0.035721140637178905
+    calibration_standard_error: 0.0005218627724710045
+    dual_multiplier: 138.03932462365054
+  full_generation:
+    model_id: 45748f7543
+    model_dir: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_emnist_target_geometry/models/target_geometry_full_seed_42_eta_10_B_32_45748f7543
+    config_path: /home/horaothor/gianmarco/domain-knowledge-analysis-generative-models/ablations/vae_mnist_emnist_target_geometry/models/target_geometry_full_seed_42_eta_10_B_32_45748f7543/config.yaml
+    seed: 42
+    eta: 10.0
+    mode: target_geometry
+    view: full
+    geometry_batch_size: 32
+    dual_learning_rate: 0.1
+    validation_base_target_mse: 0.04117026135325432
+    validation_base_source_mse: 0.007828303317228953
+    validation_adapted_target_mse: 0.011048218769331774
+    validation_adapted_source_mse: 0.021286758740743
+    validation_target_gain: 0.030122042583922547
+    validation_source_degradation: 0.013458455423514048
+    test_base_target_mse: 0.04139411936700344
+    test_base_source_mse: 0.007944586424529552
+    test_adapted_target_mse: 0.011103871874511242
+    test_adapted_source_mse: 0.020928762125968933
+    test_target_gain: 0.0302902474924922
+    test_source_degradation: 0.012984175701439381
+    test_target_fid: 22.365976333618164
+    fid_seed: 123
+    checkpoint_hash: 1aa4c6b01502ccce436b0161c37e2ac5ca65dad4e9b2f4da4bbb57ba7cd72f7d
+    fid_key: 55b03bb050115eac16c618532b0f0864d2560f3f7ba1ddc238a7b9a45113f0b6
+    source_tolerance: 0.035721140637178905
+    calibration_standard_error: 0.0005218627724710045
+    dual_multiplier: 10.0
+  target_only_generation: *id001
