@@ -39,7 +39,7 @@ def test_paired_sweep_preserves_base_settings_and_covers_every_combination(datas
             assert "transformations" not in config["lora"]["regularizer"]
         else:
             assert config["lora"]["regularizer"] is None
-    assert "target_geometry_full" in build_run_name(base)
+    assert f"target_geometry_{base['lora']['regularizer']['view']}" in build_run_name(base)
     assert [run["model_id"] for run in generate_target_geometry_runs(base, ablation, tmp_path)] == [run["model_id"] for run in runs]
 
 
@@ -124,6 +124,7 @@ def test_experiment_uses_isolated_trainer_and_source_checkpoint_split(monkeypatc
     from torch.utils.data import DataLoader, TensorDataset
     base = load_config("config/lora_vae_mnist_target_geometry.yaml")
     base["seed"] = 99
+    base["training"]["gradient_clipping"] = {"enabled": True, "max_norm": 100.}
     base["lora"]["regularizer"].update(geometry_batch_size=4, calibration_batches=4, validation_batches=2)
     source_config = deepcopy(base)
     source_config["seed"] = 17
@@ -162,6 +163,7 @@ def test_experiment_uses_isolated_trainer_and_source_checkpoint_split(monkeypatc
     experiment.adapt()
     assert captured["regularizer"].source_tolerance == pytest.approx(.0361)
     assert captured["geometry_batch_size"] == 4
+    assert captured["gradient_clipping"] == base["training"]["gradient_clipping"]
     calibration = load_config(tmp_path / "target_geometry_calibration.yaml")
     assert calibration["source_split_seed"] == 17
     assert calibration["calibration_seed"] == 99 + 17001

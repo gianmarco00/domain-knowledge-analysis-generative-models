@@ -22,6 +22,10 @@ dataloader:
 training:
   epochs: 160
   learning_rate: 0.01
+  # Clip the combined VAE + geometry gradient before Adam. Set enabled: false to disable.
+  gradient_clipping:
+    enabled: true
+    max_norm: 100.0
 
 loss:
   name: vae_loss

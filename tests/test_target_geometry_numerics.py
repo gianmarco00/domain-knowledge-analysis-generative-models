@@ -39,8 +39,10 @@ def test_unchecked_kl_overflow_can_cause_the_reported_geometry_error_on_the_next
     assert not torch.isfinite(trainer.model.encoder.map.weight).all()
 
 
-def test_nonfinite_vae_loss_is_rejected_before_adam_corrupts_weights_or_dual(monkeypatch, tmp_path):
+@pytest.mark.parametrize("clipping_enabled", [False, True])
+def test_nonfinite_vae_loss_is_rejected_before_adam_corrupts_weights_or_dual(monkeypatch, tmp_path, clipping_enabled):
     trainer = overflow_trainer(monkeypatch, tmp_path)
+    trainer.gradient_clipping_max_norm = 100. if clipping_enabled else None
     before = deepcopy(trainer.model.state_dict())
     dual = trainer.regularizer.dual_fraction
     with pytest.raises(ValueError, match="nonfinite_forward.*before optimizer.step"):
@@ -64,8 +66,10 @@ def test_nonfinite_vae_loss_is_rejected_before_adam_corrupts_weights_or_dual(mon
     assert not (tmp_path / "checkpoints" / "last.pt").exists()
 
 
-def test_finite_loss_with_nonfinite_gradient_is_rejected_without_clipping_or_update(tmp_path):
+@pytest.mark.parametrize("clipping_enabled", [False, True])
+def test_finite_loss_with_nonfinite_gradient_is_rejected_without_clipping_or_update(tmp_path, clipping_enabled):
     trainer = make_trainer(tmp_path)
+    trainer.gradient_clipping_max_norm = 100. if clipping_enabled else None
     before = deepcopy(trainer.model.state_dict())
     handle = trainer.model.encoder.map.weight.register_hook(lambda grad: torch.full_like(grad, float("inf")))
     try:

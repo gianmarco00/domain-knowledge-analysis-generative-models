@@ -3,7 +3,9 @@
 This implements the two-view candidate in `Target_Geometry_Fingerprint_Proposal.md`.
 The implementation lives in `regularizers/target_geometry.py`; its trainer and
 ablation runner are separate modules. The existing transformation regularizer,
-VAE, ELBO, LoRA layers, trainer and transformation configurations are unchanged.
+VAE, ELBO, LoRA layers and transformation configurations are unchanged. The shared
+trainer additionally supports optional optimizer gradient clipping, disabled by
+default; the Upper-EMNIST study explicitly enables it as described below.
 
 For a batch of **real images**, flatten and center across its members and form
 `G(X) = centered(X) @ centered(X).T`. The dimensionless distortion is exactly
@@ -273,6 +275,12 @@ feasibility, escape from exact collapse or rank-8 realizability.
 
 ## Nonfinite training failures
 
+The Upper-EMNIST failure snapshot now confirms an overflow of the VAE's sampled
+posterior standard deviation, with an excessive log-variance and finite geometry.
+See [the captured-failure analysis](target_geometry_upper_emnist_failure.md) for
+the evidence, reconstructed update history and an offline, algebraically
+equivalent numerical-range proposal. That proposal is not enabled in training.
+
 The pulled Thor events and checkpoint have now been inspected. See
 [the LR=0.01 investigation](target_geometry_lr001_failure_analysis.md) for the
 measured evidence, reconstructed failure-window denominator audit and operation
@@ -302,8 +310,9 @@ The target-geometry trainer now checks the actual VAE and primal objectives,
 both geometry values, and every computed trainable gradient **before** the
 optimizer/dual update. Healthy updates retain their existing arithmetic.
 The guard checks elementwise finiteness, not a float32 gradient norm that could
-overflow for otherwise finite gradients. It does not clip gradients, replace
-NaNs, change Gram denominators, skip batches or alter eta, q, c_s or the loss.
+overflow for otherwise finite gradients. The guard does not replace NaNs, change
+Gram denominators, skip batches or alter eta, q, c_s or the loss. Optional gradient
+clipping is a separate optimizer setting, applied only after this check succeeds.
 Gradient checks run on the tensor device and transfer only a scalar validity
 flag on the healthy path; detailed CPU diagnostics run only after a failure.
 Parameters and Adam state are also checked immediately after the step, before
@@ -336,10 +345,77 @@ detect invalid objectives/gradients before the update; they do not stabilize
 Adam, automatically lower its learning rate, or guarantee that the run will
 complete. When all values are finite, the loss, gradients, Adam state, dual
 update and sampler follow the original update rules, including at LR=0.01.
-An unstable run still stops and preserves its failure evidence. No clipping,
-loss/variance clamping or denominator epsilon has been introduced. The loss
+An unstable run still stops and preserves its failure evidence. That standalone
+configuration leaves clipping disabled. No loss/variance clamping or denominator
+epsilon is introduced. The loss
 numbers on a progress bar describe the previous
 completed epoch, not the failing minibatch.
+
+## Optional gradient clipping and Upper-EMNIST
+
+Set this in the **base training YAML**, outside `lora.regularizer`:
+
+```yaml
+training:
+  epochs: 160
+  learning_rate: 0.01
+  gradient_clipping:
+    enabled: true
+    max_norm: 100.0
+```
+
+Set `enabled: false` or omit `gradient_clipping` to recover the original Adam
+update exactly. `max_norm` is a positive global L2 norm cap (default 100 when
+enabled). It is an **optimizer hyperparameter**, not an eta, tolerance or new
+regularizer term. The cap 100 is a starting setting, not a demonstrated stability
+threshold for a complete Upper-EMNIST run.
+
+Each training step computes the original complete loss and backward pass, then
+clips the single concatenated vector of all optimizer gradients with a common
+factor `min(1, max_norm / (global_L2_norm + 1e-6))`, matching PyTorch norm
+clipping. Adam receives these gradients **before** updating either moment.
+Both the likelihood/KL gradient and any active geometry gradient are included;
+they are not clipped separately or per layer/view/parameter group. Gradients
+below the cap remain untouched. The source decoder is frozen as before.
+The original measured distortion still drives the same projected dual update.
+No loss, log-variance, Gram denominator, sampler or calibration formula changes.
+Clipping **does change optimizer updates when active**, so it is not an
+algebraically identical reimplementation of unclipped Adam.
+
+On CUDA the norm reductions and PyTorch foreach scaling run on the GPU. Only
+the norm reduction uses FP64, avoiding an FP32 sum-of-squares overflow for
+otherwise finite FP32 gradients; model, gradient and Adam-state dtypes stay
+unchanged. No gradient arrays are transferred to CPU. MPS uses FP32 reductions
+because it lacks FP64 support. Nonfinite gradients are rejected before scaling
+or Adam; clipping cannot repair an already nonfinite forward/backward pass.
+Nor does a gradient-norm bound imply an Adam-update bound or guarantee stability
+at LR=0.01. Start the clipped study from the original pretrained checkpoint,
+not the failed run's large Adam moments.
+
+The downloaded LR=0.001 events contain **185 models completed through epoch
+160** (110 MNIST→EMNIST Letters, 75 rotated-MNIST models), with no logged
+nonfinite loss/distortion scalars. This is evidence for those saved runs, not
+a guarantee for other seeds/data or proof that every intermediate tensor was
+finite. No Upper-EMNIST LR=0.001 events are available. At LR=0.01 the captured
+Upper-EMNIST run shows a large finite KL-gradient spike before posterior
+exponential overflow; its ordinary, unregularized LoRA baseline also logged
+NaNs from epoch 12. This motivates clipping the baseline and every view equally.
+
+`config/lora_vae_mnist_upper_emnist.yaml` enables the block above with model
+LR=0.01. Its ablation inherits it in all **26 models**: ordinary LoRA, 12 full,
+12 target-only and one source-only. Other datasets/configurations remain
+unclipped unless explicitly enabled. Run:
+
+```bash
+python scripts/run_ablation.py config/ablation_vae_mnist_upper_emnist_target_geometry.yaml
+```
+
+Results go to `ablations/vae_mnist_upper_emnist_target_geometry_clipped`, leaving
+the previous unclipped study available. Clipping settings are included in the
+existing training-config hash, so unclipped checkpoints/scores cannot be reused
+as clipped results, and changing the cap creates distinct models. Repeating the
+same clipped ablation still reuses completed models and evaluation caches.
+The unchanged source-calibration calculation can reuse its existing cache.
 
 ## Performance and equivalence audit
 

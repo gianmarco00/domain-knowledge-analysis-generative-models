@@ -1,4 +1,4 @@
-"""Opt-in target-geometry training; the existing Trainer is unchanged."""
+"""Opt-in target-geometry training with the shared optional gradient clipping."""
 
 from collections import defaultdict
 import math
@@ -208,7 +208,7 @@ class TargetGeometryTrainer(Trainer):
                 self._numerical_failure("nonfinite_backward", step, images, geometry_images,
                                         (logits, mean, log_variance), host, invalid_gradients)
             self._optimizer_snapshot.capture(self.optimizer)
-            self.optimizer.step()
+            self._optimizer_step()
             invalid_updated_tensors = invalid_named_tensors(self._optimizer_tensors())
             if invalid_updated_tensors:
                 self._numerical_failure("nonfinite_optimizer", step, images, geometry_images,

@@ -3,13 +3,15 @@ from tqdm import tqdm
 from collections import defaultdict
 
 from domain_knowledge_analysis.utils import create_random_generator, sample_random_latents
+from .gradient_clipping import gradient_clipping_max_norm, clip_optimizer_gradients
 
 class Trainer:
-    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, regularizer=None, regularizer_eta=1.0, checkpoint_manager=None, logger=None, progress_position=None, progress_description="Training", progress_stream=None):
+    def __init__(self, model, train_dataloader, validate_dataloader, optimizer, lr_scheduler, lr_scheduler_start_epoch, loss, epochs, device, regularizer=None, regularizer_eta=1.0, checkpoint_manager=None, logger=None, progress_position=None, progress_description="Training", progress_stream=None, gradient_clipping=None):
         self.model = model
         self.train_dataloader = train_dataloader
         self.validate_dataloader = validate_dataloader
         self.optimizer = optimizer
+        self.gradient_clipping_max_norm = gradient_clipping_max_norm(gradient_clipping)
         self.lr_scheduler = lr_scheduler
         self.lr_scheduler_start_epoch = lr_scheduler_start_epoch
         self.loss = loss
@@ -63,7 +65,7 @@ class Trainer:
                 loss_value = self.loss(x, logits, mean, log_variance) + self.regularizer_eta * regularizer_loss
 
             loss_value.backward()
-            self.optimizer.step()
+            self._optimizer_step()
 
             total_loss += loss_value.item() * batch_size
             total_samples += batch_size
@@ -78,6 +80,11 @@ class Trainer:
         mean_loss_components = {name: value / total_samples for name, value in total_loss_components.items()}
 
         return mean_loss, mean_loss_components
+
+    def _optimizer_step(self):
+        if self.gradient_clipping_max_norm is not None:
+            clip_optimizer_gradients(self.optimizer, self.gradient_clipping_max_norm)
+        self.optimizer.step()
     
     def validate_epoch(self):
 
