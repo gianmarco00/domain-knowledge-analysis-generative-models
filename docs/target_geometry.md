@@ -132,38 +132,64 @@ python scripts/run_target_geometry.py config/lora_vae_mnist_target_geometry.yaml
 python scripts/run_target_geometry.py config/lora_vae_ellipsis_target_geometry.yaml
 ```
 
-Each ablation contains **63 runs**: for each of seeds 42, 43 and 44, one ordinary
-LoRA baseline, eighteen full-view grid points (3 eta × 2 B × 3 dual learning
-rates), and two one-view controls at eta=100/B=64/dual rate=0.01. The controls
-share the source calibration and target sampling draws of their matched full
-run. All VAE/LoRA architecture, beta, training epochs, model learning rate,
-training batch size and target shift match the existing dataset config. Only
-regularizer-specific settings vary, with seed repetitions across all variants.
-The YAML defaults to two parallel training workers; tune this execution setting
-to available hardware. Calibration, model copies and extra forwards add cost.
+Every seed × eta × geometry batch size × dual learning rate combination
+trains **both full and target-only** models. One ordinary LoRA baseline per seed
+and the explicitly configured source-only controls are retained. Matching
+controls deduplicate by training ID; off-grid full/target-only controls are also
+paired. The current YAML files produce 146 runs for rotated MNIST, 38 for
+ellipses, and 146 for MNIST→EMNIST. Source calibration and sampling streams are
+shared across matched modes; each mode keeps its own model and dual state.
 
-The runner reuses the existing training workers, completed-checkpoint detection,
-reconstruction scorers and FID implementation. It writes distinct model IDs,
-per-run metrics, across-seed mean/std summaries and geometry-specific figures.
-Target reconstruction is primary: the full-view model with minimum validation
-target MSE is selected for qualitative inspection. Test FID is reported as a
-secondary metric and is not used to choose that model. Compare seed-aggregated
-results in `results/summary.csv` when drawing experimental conclusions.
+Existing full models, baselines and the former single target-only control keep
+their training IDs, config paths and checkpoint directories. Rerunning trains
+only missing models, reuses valid cached scores/FID, and recalculates all figures.
+VAE/LoRA architecture, loss, training settings and the regularizer's math are
+unchanged by the expanded grid. Parallelism remains an execution setting in
+`parallel_models`.
+
+Qualitative selection now has four independent roles:
+
+- Full reconstructions: lowest **validation target MSE**, with lower test FID
+  breaking an exact tie.
+- Target-only reconstructions and the comparison star in figures 1–2: maximize
+  the equal-weight mean of **test target MSE improvement (%)** and **test target
+  FID improvement (%)**, each relative to ordinary LoRA with the same seed.
+  Ties prefer lower absolute FID, then lower target MSE, then a stable model ID.
+- Full generations: lowest **test target FID** among full models.
+- Target-only generations: lowest **test target FID** among target-only models.
+
+Both generation selections break FID ties with lower test target MSE. The
+balanced target-only score is `(target_MSE_improvement + FID_improvement) / 2`;
+it does not maximize raw error. The selected reconstruction and generation
+models can differ, and each figure identifies the model it actually displays.
+`results/selected_models.yaml` saves all four choices, their rules and the
+balanced score. `selected_model.yaml` retains the full reconstruction selection
+for compatibility. Across-seed mean/std metrics remain in `results/summary.csv`.
 
 ## Result figures
 
-Each ablation generates five figures in `figures/`:
+Each ablation generates ten figures in `figures/`:
 
-- `figure_1_eta_all.png`: one row per dual learning rate, with target MSE,
-  source MSE and target FID as the three columns. Includes every evaluated
-  eta, geometry batch size, seed and view (full, target only, source only).
-- `figure_2_eta_zoom.png`: the same layout with automatic scale selection.
-- `figure_3_source_reconstructions.png`: held-out source inputs, source VAE,
-  ordinary LoRA and selected target-geometry reconstructions.
-- `figure_4_target_reconstructions.png`: the corresponding held-out target
-  comparison, using identical inputs across model columns.
-- `figure_5_generations.png`: source VAE, ordinary LoRA and selected
-  target-geometry generations using the same N(0,I) latent vectors.
+- `figure_1_eta_all.png`: full-mode grid with one row per dual learning rate
+  and target MSE, source MSE and target FID columns. Source-only controls remain
+  visible; the single balanced target-only selection is marked by a star at
+  its actually measured eta/LR, rather than copying it into other LR panels.
+- `figure_2_eta_zoom.png`: the corresponding automatic zoom.
+- `figure_3_target_only_eta_all.png`: the entire target-only grid with the same
+  normalization, LR layout, batch-size colors and individual seed trajectories.
+- `figure_4_target_only_eta_zoom.png`: its automatic zoom, using the exact same
+  window, eta selection, clipping and dotted-connection rules.
+- `figure_5_source_reconstruction_full.png`
+- `figure_6_target_reconstruction_full.png`
+- `figure_7_generations_full.png`
+- `figure_8_source_reconstruction_target_only.png`
+- `figure_9_target_reconstruction_target_only.png`
+- `figure_10_generations_target_only.png`
+
+The two reconstruction figures for each mode use that mode's reconstruction
+selection. Generation figures 7 and 10 independently use that mode's lowest-FID
+model. Every qualitative grid compares source VAE, same-seed ordinary LoRA and
+the displayed selected model. Reconstruction grids also show the real input.
 
 The eta plots match the output-Gram local-sweep convention:
 
@@ -178,7 +204,7 @@ geometry batch size B; marker/line style identifies the decoder view. Individual
 seed trajectories remain separate, as in the output-Gram parameter sweep.
 A nonpositive/nonfinite baseline score is rejected because the requested
 percentage is undefined; no artificial denominator or alternative metric is used.
-One-view controls appear only at their actually evaluated dual learning rates.
+Source-only controls and the selected target-only comparison appear only at their actually evaluated dual learning rates.
 
 For each metric, the zoom first averages improvements across seeds for every
 (rate, view, B, eta) setting and finds the best mean. Its symmetric half-range
@@ -200,7 +226,7 @@ scores and the all-model figure retain the full values.
 Rerunning the normal ablation skips completed best+last checkpoints and reuses
 valid cached metrics/FID; plot-only code changes do not change model IDs or the
 FID scoring fingerprint. To regenerate figures entirely from saved metrics
-and `results/qualitative_examples.pt`, with no model loading, training or scoring:
+and cached qualitative banks, with no model loading, training or scoring:
 
 ```bash
 python scripts/run_ablation.py config/ablation_vae_mnist_target_geometry.yaml --plots-only
@@ -208,20 +234,28 @@ python scripts/run_ablation.py config/ablation_vae_ellipsis_target_geometry.yaml
 ```
 
 Plot-only mode uses all rows already saved in that output directory, regardless
-of later sweep YAML edits. It requires the saved qualitative bank to match the
-selected model/checkpoint; otherwise a normal rerun recreates that bank from
-the completed models. The obsolete overview, per-LR eta files, reconstruction
-alias and old 5/6/7 filenames are removed after their replacement figures render.
+of later sweep YAML edits. The new independent reconstruction/generation
+selections require refreshed image banks: run the normal ablation once after
+upgrading, then use `--plots-only` for later style changes. Normal reruns reuse
+completed models and train only the new target-only grid entries. A missing or
+stale bank fails explicitly instead of displaying a different checkpoint's
+images. Obsolete figure names are removed after their replacements render.
 
-Qualitative examples are sampled reproducibly from held-out test datasets using
-`visual_seed`; the same indices are used in the source and transported target
-datasets. All reconstruction columns share the same inputs. All generation
-columns share the same latent bank. `num_qualitative_images` controls examples
-per reconstruction grid; optional `num_generation_images` controls the generation
-grid independently and defaults to the same count. The selected model's eta, B,
-dual rate and seed are shown on each figure. The runner saves these exact image
-banks and latent vectors in `results/qualitative_examples.pt` for reproducibility.
-The source VAE and ordinary LoRA comparison uses the selected model's seed.
+Qualitative inputs are sampled reproducibly with `visual_seed`. Both modes use
+**exactly the same source images, target images and prior latent vectors**, even
+if their selected models have different training seeds. Each displayed model
+uses the ordinary LoRA baseline with its own training seed. The shared prior
+bank follows N(0,I); reconstructions use posterior means. `num_qualitative_images`
+sets reconstruction examples and `num_generation_images` optionally sets the
+number of generations (default: the same count).
+
+`results/qualitative_examples_full.pt` and
+`results/qualitative_examples_target_only.pt` save these exact tensors plus
+separate reconstruction/generation selections and baseline metadata. Matching
+banks are reused on normal reruns as well as plot-only runs. Checkpoint IDs and
+hashes for both roles, baseline hashes, visual seed/counts, and shared input
+banks are checked before reuse. Image creation loads each needed model once
+per mode and computes only the outputs belonging to its selected role.
 
 Each run records `target_geometry_calibration.yaml`. TensorBoard includes the
 two distortions (whichever views are enabled), mean worst distortion, source

@@ -1,5 +1,5 @@
-# 63 runs: 3 seeds x (1 ordinary LoRA + 18 full-view grid points + 2 one-view controls).
-# Full grid: 3 eta x 2 geometry batch sizes x 3 dual learning rates per seed.
+# 146 runs: 1 seed x (1 ordinary LoRA + 72 full + 72 target-only + 1 source-only).
+# Both full and target-only cover every eta x geometry batch size x dual rate.
 # B is shared by source calibration, target training geometry and geometry validation.
 base_config: config/lora_vae_mnist_target_geometry.yaml
 ablation:
@@ -25,9 +25,6 @@ ablation:
   - 0.01
   - 0.1
   controls:
-  - view: target_only
-    eta: 100.0
-    geometry_batch_size: 64
   - view: source_only
     eta: 100.0
     geometry_batch_size: 64

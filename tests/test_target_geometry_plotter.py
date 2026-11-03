@@ -24,9 +24,10 @@ def metric_rows():
                          "test_adapted_target_mse": baseline["test_adapted_target_mse"] * (.9 if seed == 42 else .8),
                          "test_adapted_source_mse": baseline["test_adapted_source_mse"] * (.5 if seed == 42 else .4),
                          "test_target_fid": baseline["test_target_fid"] * (.95 if seed == 42 else .85)})
-    rows.append({"view": "target_only", "seed": 42, "eta": 100., "geometry_batch_size": 64,
-                 "dual_learning_rate": .01, "test_adapted_target_mse": 100.,
-                 "test_adapted_source_mse": 100., "test_target_fid": 1000.})
+            rows.append({**rows[-1], "view": "target_only",
+                         "test_adapted_target_mse": baseline["test_adapted_target_mse"] * (.85 if seed == 42 else .7),
+                         "test_adapted_source_mse": baseline["test_adapted_source_mse"] * (.8 if seed == 42 else .7),
+                         "test_target_fid": baseline["test_target_fid"] * (.8 if seed == 42 else .75)})
     rows.append({"view": "source_only", "seed": 42, "eta": 100., "geometry_batch_size": 64,
                  "dual_learning_rate": .01, "test_adapted_target_mse": .02,
                  "test_adapted_source_mse": .01, "test_target_fid": 18.})
@@ -63,7 +64,7 @@ def test_stacked_lr_rows_three_metrics_controls_and_consistent_batch_colors(tmp_
     assert len(figures) == 2
     for figure in figures:
         assert len(figure.axes) == 9  # Three LR rows, target/source/FID columns.
-        assert {text.get_text() for text in figure.legends[0].texts} >= {"B = 64", "B = 128", "Full", "Target only", "Source only"}
+        assert {text.get_text() for text in figure.legends[0].texts} >= {"B = 64", "B = 128", "Full", "Selected target only", "Source only"}
         for row_index, rate in enumerate((.001, .01, .1)):
             axes = figure.axes[3 * row_index:3 * row_index + 3]
             for axis, (_, title) in zip(axes, TargetGeometryPlotter.METRICS):
@@ -74,7 +75,8 @@ def test_stacked_lr_rows_three_metrics_controls_and_consistent_batch_colors(tmp_
         # into unmatched learning rates. Their marker and line style distinguish them.
         all_markers = {line.get_marker() for axis in figure.axes for line in axis.lines}
         if figure is figures[0]:
-            assert {"o", "s", "P"} <= all_markers
+            assert {"o", "*", "P"} <= all_markers
+            assert sum(line.get_marker() == "*" for axis in figure.axes for line in axis.lines) == 3
             colors = [[line.get_color() for line in axis.lines[:4]] for axis in figure.axes[:3]]
             assert colors[0] == colors[1] == colors[2]
             assert colors[0][0] != colors[0][1]
@@ -112,6 +114,24 @@ def test_zoom_best_improvement_plus_five_selection_clipping_and_dotted_lines(tmp
     assert dotted[0].get_color() == plt.get_cmap("tab10")(0)
     assert any(list(point) == [10000., -20.] for collection in fid.collections for point in collection.get_offsets())
     assert not any(100000. in line.get_xdata() for line in fid.lines)
+    for figure in figures:
+        real_close(figure)
+
+
+def test_target_only_figures_use_the_entire_grid_and_the_same_rendering_rules(tmp_path, monkeypatch):
+    figures, real_close = capture_figures(monkeypatch)
+    rows = metric_rows()
+    paths = TargetGeometryPlotter(tmp_path, {}).plot_target_only_metric_pairs(rows)
+    assert [path.name for path in paths] == ["figure_3_target_only_eta_all.png", "figure_4_target_only_eta_zoom.png"]
+    assert all(path.stat().st_size > 1000 for path in paths)
+    for figure in figures:
+        assert len(figure.axes) == 9
+        legend = {text.get_text() for text in figure.legends[0].texts}
+        assert "Target only" in legend and "Full" not in legend and "Source only" not in legend
+    for axis in figures[0].axes:
+        curves = [line for line in axis.lines if line.get_marker() == "s"]
+        assert len(curves) == 4  # B=64/128, seeds=42/43, all etas in each.
+        assert all(list(line.get_xdata()) == [10., 100., 1000.] for line in curves)
     for figure in figures:
         real_close(figure)
 
@@ -216,12 +236,48 @@ def test_qualitative_outputs_use_identical_inputs_and_latents_and_are_reproducib
 def test_source_target_reconstructions_and_generations_render_and_save_sample_banks(tmp_path, monkeypatch):
     ablation, selected, _, _ = qualitative_ablation(monkeypatch, tmp_path)
     paths = ablation.plot_reconstructions(selected)
-    assert {path.name for path in paths} == {"figure_3_source_reconstructions.png", "figure_4_target_reconstructions.png", "figure_5_generations.png"}
+    assert {path.name for path in paths} == {"figure_5_source_reconstruction_full.png", "figure_6_target_reconstruction_full.png", "figure_7_generations_full.png"}
     assert all(path.stat().st_size > 1000 for path in paths)
-    saved = torch.load(tmp_path / "results" / "qualitative_examples.pt", weights_only=True)
+    saved = torch.load(tmp_path / "results" / "qualitative_examples_full.pt", weights_only=True)
     assert set(saved) >= {"source", "target", "generation", "latents", "selected_model"}
     assert saved["latents"].shape == (3, 2)
     assert saved["selected_model"] == selected
+
+
+def test_generation_uses_its_own_model_and_banks_are_shared_across_modes(tmp_path, monkeypatch):
+    ablation, selected, models, closed = qualitative_ablation(monkeypatch, tmp_path)
+    generation = {**selected, "model_id": "full-generation", "eta": 1000.}
+    target = {**selected, "model_id": "target", "view": "target_only", "eta": 10.}
+    target_generation = {**target, "model_id": "target-generation", "eta": 1000.}
+    models.update({"full-generation": FakeModel(.35), "target": FakeModel(.45), "target-generation": FakeModel(.55)})
+    ablation.runs.extend([generation, target, target_generation])
+    full = ablation.create_qualitative_results(selected, generation)
+    target_bank = ablation.create_qualitative_results(target, target_generation, common_bank=full)
+    assert full["selected_model"] == selected and full["generation_selected_model"] == generation
+    torch.testing.assert_close(full["source"]["regularized"], full["source"]["input"] * .25 + .25)
+    base_generation = full["latents"][:, 0].sigmoid().reshape(3, 1, 1, 1).expand(-1, 1, 4, 4) * .25
+    torch.testing.assert_close(full["generation"]["regularized"], base_generation + .35)
+    torch.testing.assert_close(target_bank["generation"]["regularized"], base_generation + .55)
+    for split in ("source", "target"):
+        torch.testing.assert_close(full[split]["input"], target_bank[split]["input"], rtol=0, atol=0)
+    torch.testing.assert_close(full["latents"], target_bank["latents"], rtol=0, atol=0)
+    assert not models["selected"].latent_calls
+    assert not models["full-generation"].reconstruction_calls
+    assert not models["target"].latent_calls
+    assert not models["target-generation"].reconstruction_calls
+    assert closed.count("baseline") == 2  # Once per mode, reused between roles/splits.
+
+
+def test_qualitative_cache_reuses_matching_outputs_and_detects_changed_generation_checkpoint(tmp_path, monkeypatch):
+    ablation, selected, models, closed = qualitative_ablation(monkeypatch, tmp_path)
+    ablation.plot_reconstructions(selected)
+    previous_calls = len(closed)
+    ablation.plot_reconstructions(selected, cached_only=True)
+    assert len(closed) == previous_calls
+    generation = {**selected, "model_id": "new-generation", "checkpoint_hash": "new-hash"}
+    with pytest.raises(ValueError, match="missing or stale"):
+        ablation.plot_reconstructions(selected, generation, cached_only=True)
+    assert len(closed) == previous_calls
 
 
 def test_plots_only_reuses_scores_and_image_banks_without_models_fid_or_training(tmp_path, monkeypatch):
@@ -234,15 +290,21 @@ def test_plots_only_reuses_scores_and_image_banks_without_models_fid_or_training
                    dual_learning_rate=row.get("dual_learning_rate", 0.),
                    validation_adapted_target_mse=row["test_adapted_target_mse"],
                    test_target_gain=0., test_source_degradation=0.)
-    selected = min((row for row in rows if row["view"] == "full"), key=lambda row: row["validation_adapted_target_mse"])
+    selections, _ = module.select_target_geometry_models(rows)
     metrics = tmp_path / "results" / "metrics.csv"
     save_rows(rows, metrics)
     original_metrics = metrics.read_bytes()
     images = torch.zeros(1, 1, 4, 4)
-    bank = {key: {name: images for name in ("input", "base", "lora", "regularized")} for key in ("source", "target")}
-    bank["generation"] = {name: images for name in ("base", "lora", "regularized")}
-    bank["selected_model"] = dict(selected)
-    torch.save(bank, tmp_path / "results" / "qualitative_examples.pt")
+    baselines = {row["seed"]: row for row in rows if not row["eta"]}
+    for view in ("full", "target_only"):
+        reconstruction = selections[f"{view}_reconstruction"]
+        generation = selections[f"{view}_generation"]
+        bank = {key: {name: images for name in ("input", "base", "lora", "regularized")} for key in ("source", "target")}
+        bank.update(generation={name: images for name in ("base", "lora", "regularized")},
+                    selected_model=dict(reconstruction), generation_selected_model=dict(generation),
+                    baseline_models={"reconstruction": baselines[reconstruction["seed"]], "generation": baselines[generation["seed"]]},
+                    latents=torch.zeros(1, 2), visual_seed=123)
+        torch.save(bank, tmp_path / "results" / f"qualitative_examples_{view}.pt")
     figures = tmp_path / "figures"
     figures.mkdir()
     for name in ("target_geometry.png", "target_reconstructions.png", "eta_retention_gain_dual_0.01.png",
@@ -250,7 +312,7 @@ def test_plots_only_reuses_scores_and_image_banks_without_models_fid_or_training
         (figures / name).write_bytes(b"obsolete")
     config = tmp_path / "ablation.yaml"
     save_yaml({"base_config": "config/lora_vae_mnist_target_geometry.yaml",
-               "ablation": {"output_dir": str(tmp_path)}}, config)
+               "ablation": {"output_dir": str(tmp_path), "num_qualitative_images": 1}}, config)
     def forbidden(*args, **kwargs):
         pytest.fail("Plot-only execution must not generate training configs, train, load models, score, or construct FID")
     monkeypatch.setattr(module, "generate_target_geometry_runs", forbidden)
@@ -261,8 +323,9 @@ def test_plots_only_reuses_scores_and_image_banks_without_models_fid_or_training
     assert len(returned) == len(rows)
     assert metrics.read_bytes() == original_metrics
     assert {path.name for path in figures.iterdir()} == {
-        "figure_1_eta_all.png", "figure_2_eta_zoom.png", "figure_3_source_reconstructions.png",
-        "figure_4_target_reconstructions.png", "figure_5_generations.png"}
+        "figure_1_eta_all.png", "figure_2_eta_zoom.png", "figure_3_target_only_eta_all.png", "figure_4_target_only_eta_zoom.png",
+        "figure_5_source_reconstruction_full.png", "figure_6_target_reconstruction_full.png", "figure_7_generations_full.png",
+        "figure_8_source_reconstruction_target_only.png", "figure_9_target_reconstruction_target_only.png", "figure_10_generations_target_only.png"}
     assert not (tmp_path / "models").exists()
 
 

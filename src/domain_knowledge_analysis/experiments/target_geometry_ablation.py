@@ -71,12 +71,52 @@ def generate_target_geometry_runs(base_config, ablation_config, output_dir):
     for seed in ablation_config["seeds"]:
         add(seed, 0.0)
         for eta, batch_size, rate in product(ablation_config["eta_values"], ablation_config["geometry_batch_sizes"], rates):
-            add(seed, float(eta), batch_size, "full", float(rate))
-        # Matched-budget one-view controls, with the same source tolerance.
+            for view in ("full", "target_only"):
+                add(seed, float(eta), batch_size, view, float(rate))
+        # Pair explicit full/target-only controls too, including off-grid ones.
+        # Existing matching controls deduplicate by their unchanged training ID.
         for control in ablation_config.get("controls", []):
-            add(seed, float(control["eta"]), control["geometry_batch_size"], control["view"],
-                float(control.get("dual_learning_rate", base_regularizer.get("dual_learning_rate", 0.01))))
+            views = ("full", "target_only") if control["view"] in {"full", "target_only"} else (control["view"],)
+            for view in views:
+                add(seed, float(control["eta"]), control["geometry_batch_size"], view,
+                    float(control.get("dual_learning_rate", base_regularizer.get("dual_learning_rate", 0.01))))
     return list(runs.values())
+
+
+def select_target_geometry_models(results):
+    """Separate reconstruction and generation selections; lower errors are better."""
+    from domain_knowledge_analysis.plotting.target_geometry_plotter import TargetGeometryPlotter
+    from domain_knowledge_analysis.plotting.ablation_plotter import AblationPlotter
+
+    baselines = AblationPlotter.ordinary_by_seed([row for row in results if not float(row["eta"])])
+    candidates = {view: [row for row in results if row["view"] == view and float(row["eta"]) > 0]
+                  for view in ("full", "target_only")}
+    if any(not rows for rows in candidates.values()):
+        raise ValueError("Model selection requires evaluated full and target-only models.")
+    for rows in candidates.values():
+        for row in rows:
+            if row["seed"] not in baselines:
+                raise ValueError("Every selected model requires its own ordinary LoRA baseline.")
+            for metric in ("validation_adapted_target_mse", "test_adapted_target_mse", "test_target_fid"):
+                if not math.isfinite(float(row[metric])) or float(row[metric]) < 0:
+                    raise ValueError(f"Model selection requires finite, nonnegative {metric}.")
+
+    def fid_key(row):
+        return (float(row["test_target_fid"]), float(row["test_adapted_target_mse"]), str(row["model_id"]))
+
+    def balanced_score(row):
+        baseline = baselines[row["seed"]]
+        return sum(TargetGeometryPlotter.metric_value(row, baseline, metric)
+                   for metric in ("test_adapted_target_mse", "test_target_fid")) / 2
+
+    target = min(candidates["target_only"], key=lambda row: (-balanced_score(row), *fid_key(row)))
+    selections = {
+        "full_reconstruction": min(candidates["full"], key=lambda row: (float(row["validation_adapted_target_mse"]), *fid_key(row))),
+        "target_only_reconstruction": target,
+        "full_generation": min(candidates["full"], key=fid_key),
+        "target_only_generation": min(candidates["target_only"], key=fid_key),
+    }
+    return selections, balanced_score(target)
 
 
 class TargetGeometryAblation(Ablation):
@@ -137,12 +177,16 @@ class TargetGeometryAblation(Ablation):
         return self.render_results(results, cached_only=True)
 
     def render_results(self, results, cached_only=False):
-        regularized = [row for row in results if row["eta"] and row["view"] == "full"]
-        if not regularized:
-            raise ValueError("No evaluated full-view target-geometry models to select.")
-        selected = min(regularized, key=lambda row: row["validation_adapted_target_mse"])
+        selections, balanced_score = select_target_geometry_models(results)
         save_yaml({"selection": "minimum validation target reconstruction MSE among full-view runs",
-                   "selected_model": selected}, self.output_dir / "results" / "selected_model.yaml")
+                   "selected_model": selections["full_reconstruction"]}, self.output_dir / "results" / "selected_model.yaml")
+        save_yaml({"selection_rules": {
+            "full_reconstruction": "minimum validation target MSE; ties prefer lower test FID",
+            "target_only_reconstruction": "maximum equal-weight mean of same-seed LoRA-relative test target MSE and FID improvements; ties prefer lower FID",
+            "full_generation": "minimum test target FID among full models; ties prefer lower test target MSE",
+            "target_only_generation": "minimum test target FID among target-only models; ties prefer lower test target MSE",
+        }, "target_only_balanced_improvement_percent": balanced_score, "models": selections},
+            self.output_dir / "results" / "selected_models.yaml")
         # Also report across-seed means; individual seed selection is only for
         # qualitative inspection, not evidence for a winning hyperparameter.
         groups = {}
@@ -160,18 +204,10 @@ class TargetGeometryAblation(Ablation):
             aggregates.append(aggregate)
         save_rows(aggregates, self.output_dir / "results" / "summary.csv")
         from domain_knowledge_analysis.plotting.target_geometry_plotter import TargetGeometryPlotter
-        TargetGeometryPlotter(self.output_dir, self.ablation_config).plot_metric_pairs(results)
-        if cached_only:
-            path = self.output_dir / "results" / "qualitative_examples.pt"
-            if not path.exists():
-                raise ValueError("Saved qualitative image bank is missing. Rerun the ablation normally to regenerate it from completed models.")
-            qualitative = torch.load(path, map_location="cpu", weights_only=True)
-            saved_selection = qualitative["selected_model"]
-            if any(saved_selection.get(key) != selected.get(key) for key in ("model_id", "checkpoint_hash")):
-                raise ValueError("Saved qualitative bank does not match the selected checkpoint. Rerun the ablation normally to refresh it.")
-            TargetGeometryPlotter(self.output_dir, self.ablation_config).plot_qualitative(qualitative)
-        else:
-            self.plot_reconstructions(selected)
+        plotter = TargetGeometryPlotter(self.output_dir, self.ablation_config)
+        plotter.plot_metric_pairs(results, selected_target_only=selections["target_only_reconstruction"])
+        plotter.plot_target_only_metric_pairs(results)
+        self.plot_selected_models(selections, results, cached_only=cached_only)
         print(f"Results saved in {self.output_dir}")
         return results
 
@@ -191,57 +227,128 @@ class TargetGeometryAblation(Ablation):
                     row[key] = int(value) if key in {"seed", "geometry_batch_size", "fid_seed"} else float(value)
         return {row["model_id"]: row for row in rows}
 
-    def create_qualitative_results(self, selected):
-        """Use fixed held-out inputs and common prior draws across all models."""
-        regularized_run = next(r for r in self.runs if r["model_id"] == selected["model_id"])
-        ordinary_run = next(r for r in self.runs if r["seed"] == selected["seed"] and not r["eta"])
+    @torch.no_grad()
+    def create_qualitative_results(self, selected, generation_selected=None, common_bank=None):
+        """Separate model choices, shared real inputs/prior draws, no training."""
+        generation_selected = generation_selected or selected
         with ExitStack() as cleanup:
-            ordinary = self.load_or_train(ordinary_run)
-            cleanup.callback(ordinary.logger.close)
-            regularized = self.load_or_train(regularized_run)
-            cleanup.callback(regularized.logger.close)
-            source_loader = utils.create_testing_dataloaders(ordinary.config)
-            target_loader = utils.create_testing_dataloaders(ordinary.config, ordinary.config["lora"]["transformed_dataset"])
+            loaded = {}
+
+            def load(run):
+                if run["model_id"] not in loaded:
+                    experiment = self.load_or_train(run)
+                    loaded[run["model_id"]] = experiment
+                    cleanup.callback(experiment.logger.close)
+                return loaded[run["model_id"]]
+
+            def run_for(selection):
+                return next(run for run in self.runs if run["model_id"] == selection["model_id"])
+
+            def baseline_for(selection):
+                return next(run for run in self.runs if run["seed"] == selection["seed"] and not run["eta"])
+
+            ordinary = load(baseline_for(selected))
             count = positive_integer(self.ablation_config.get("num_qualitative_images", 6), "num_qualitative_images")
             seed = int(self.ablation_config.get("visual_seed", 123))
-
-            def sample_images(dataset):
-                if len(dataset) < count:
-                    raise ValueError("Not enough held-out images for num_qualitative_images.")
-                # Matching source/transported datasets use matching indices.
-                indices = torch.randperm(len(dataset), generator=utils.create_random_generator(seed))[:count]
-                return torch.stack([dataset[int(index)][0] for index in indices])
-
-            source_images = sample_images(source_loader.dataset)
-            target_images = sample_images(target_loader.dataset)
             latent_count = positive_integer(self.ablation_config.get("num_generation_images", count), "num_generation_images")
-            latents = utils.sample_random_latents(latent_count, ordinary.model.encoder_params["latent_dim"], utils.create_random_generator(seed))
+            if common_bank is None:
+                source_loader = utils.create_testing_dataloaders(ordinary.config)
+                target_loader = utils.create_testing_dataloaders(ordinary.config, ordinary.config["lora"]["transformed_dataset"])
 
-            def model_outputs(experiment):
-                return {
-                    "source": experiment.model.reconstruct_images(source_images).detach().cpu(),
-                    "target": experiment.model.reconstruct_images(target_images).detach().cpu(),
-                    "generation": experiment.model.generate_images(latent_count, latents).detach().cpu(),
-                }
+                def sample_images(dataset):
+                    if len(dataset) < count:
+                        raise ValueError("Not enough held-out images for num_qualitative_images.")
+                    indices = torch.randperm(len(dataset), generator=utils.create_random_generator(seed))[:count]
+                    return torch.stack([dataset[int(index)][0] for index in indices])
 
-            ordinary.lora_manager.disable_adapters()
-            base = model_outputs(ordinary)
-            ordinary.lora_manager.enable_adapters()
-            adapted = model_outputs(ordinary)
-            regularized.lora_manager.enable_adapters()
-            proposed = model_outputs(regularized)
-            return {
-                "source": {"input": source_images.cpu(), "base": base["source"], "lora": adapted["source"], "regularized": proposed["source"]},
-                "target": {"input": target_images.cpu(), "base": base["target"], "lora": adapted["target"], "regularized": proposed["target"]},
-                "generation": {"base": base["generation"], "lora": adapted["generation"], "regularized": proposed["generation"]},
-                "latents": latents.cpu(), "selected_model": dict(selected), "visual_seed": seed,
-            }
+                source_images = sample_images(source_loader.dataset)
+                target_images = sample_images(target_loader.dataset)
+                latents = utils.sample_random_latents(latent_count, ordinary.model.encoder_params["latent_dim"], utils.create_random_generator(seed))
+            else:
+                # The two modes use exactly the same image and latent banks,
+                # even when their winning models have different training seeds.
+                source_images = common_bank["source"]["input"]
+                target_images = common_bank["target"]["input"]
+                latents = common_bank["latents"]
 
-    def plot_reconstructions(self, selected):
+            result = {}
+            for split, images in (("source", source_images), ("target", target_images), ("generation", latents)):
+                selection = generation_selected if split == "generation" else selected
+                baseline = load(baseline_for(selection))
+                proposed = load(run_for(selection))
+
+                def outputs(experiment):
+                    if split == "generation":
+                        return experiment.model.generate_images(latent_count, images).detach().cpu()
+                    return experiment.model.reconstruct_images(images).detach().cpu()
+
+                baseline.lora_manager.disable_adapters()
+                try:
+                    base = outputs(baseline)
+                finally:
+                    baseline.lora_manager.enable_adapters()
+                adapted = outputs(baseline)
+                proposed.lora_manager.enable_adapters()
+                values = {"base": base, "lora": adapted, "regularized": outputs(proposed)}
+                if split != "generation":
+                    values["input"] = images.cpu()
+                result[split] = values
+            return {**result, "latents": latents.cpu(), "selected_model": dict(selected),
+                    "generation_selected_model": dict(generation_selected), "visual_seed": seed,
+                    "view": selected.get("view", "full")}
+
+    def plot_selected_models(self, selections, results, cached_only=False):
+        baselines = {row["seed"]: row for row in results if not float(row["eta"])}
+        common_bank = None
+        paths = []
+        for view in ("full", "target_only"):
+            reconstruction = selections[f"{view}_reconstruction"]
+            generation = selections[f"{view}_generation"]
+            baseline_models = {"reconstruction": baselines[reconstruction["seed"]],
+                               "generation": baselines[generation["seed"]]}
+            paths.extend(self.plot_reconstructions(reconstruction, generation, view=view, common_bank=common_bank,
+                                                  cached_only=cached_only, baseline_models=baseline_models))
+            if view == "full":
+                common_bank = torch.load(self.output_dir / "results" / "qualitative_examples_full.pt",
+                                         map_location="cpu", weights_only=True)
+        return paths
+
+    def plot_reconstructions(self, selected, generation_selected=None, view="full", common_bank=None,
+                             cached_only=False, baseline_models=None):
         from domain_knowledge_analysis.plotting.target_geometry_plotter import TargetGeometryPlotter
-        results = self.create_qualitative_results(selected)
-        # Preserve the actual displayed samples and prior vectors for review.
-        path = self.output_dir / "results" / "qualitative_examples.pt"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(results, path)
-        return TargetGeometryPlotter(self.output_dir, self.ablation_config).plot_qualitative(results)
+        generation_selected = generation_selected or selected
+        path = self.output_dir / "results" / f"qualitative_examples_{view}.pt"
+        results = torch.load(path, map_location="cpu", weights_only=True) if path.exists() else None
+
+        def same_model(stored, expected):
+            return all(stored.get(key) == expected.get(key) for key in ("model_id", "checkpoint_hash"))
+
+        def matches(bank):
+            if bank is None or not same_model(bank["selected_model"], selected):
+                return False
+            if not same_model(bank.get("generation_selected_model", {}), generation_selected):
+                return False
+            count = self.ablation_config.get("num_qualitative_images", 6)
+            if (bank.get("visual_seed") != self.ablation_config.get("visual_seed", 123)
+                    or len(bank["source"]["input"]) != count or len(bank["target"]["input"]) != count
+                    or len(bank["latents"]) != self.ablation_config.get("num_generation_images", count)):
+                return False
+            if baseline_models is not None and any(
+                    not same_model(bank.get("baseline_models", {}).get(role, {}), model)
+                    for role, model in baseline_models.items()):
+                return False
+            if common_bank is not None and (any(not torch.equal(bank[split]["input"], common_bank[split]["input"])
+                                               for split in ("source", "target"))
+                                            or not torch.equal(bank["latents"], common_bank["latents"])):
+                return False
+            return True
+
+        if not matches(results):
+            if cached_only:
+                raise ValueError(f"Saved {view} qualitative bank is missing or stale for the selected reconstruction/FID models. "
+                                 "Rerun the ablation normally once to refresh it; completed models are reused.")
+            results = self.create_qualitative_results(selected, generation_selected, common_bank=common_bank)
+            results["baseline_models"] = baseline_models or {}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(results, path)
+        return TargetGeometryPlotter(self.output_dir, self.ablation_config).plot_qualitative(results, view=view)

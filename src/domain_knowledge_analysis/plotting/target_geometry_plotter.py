@@ -85,13 +85,15 @@ class TargetGeometryPlotter:
                        for eta, value in points if -radius <= value <= radius})
 
     @classmethod
-    def draw_series(cls, axis, points, color, view, selected, radius=None):
+    def draw_series(cls, axis, points, color, view, selected, radius=None, highlight=False):
         _, marker, style = cls.VIEWS[view]
+        if highlight:
+            marker, style = "*", "None"
         visible = [(index, eta, value) for index, (eta, value) in enumerate(points) if eta in selected]
         if radius is None:
             axis.plot([eta for _, eta, _ in visible], [value for _, _, value in visible],
-                      color=color, marker=marker, linestyle=style, markersize=6,
-                      markeredgecolor="white", markeredgewidth=.6, linewidth=1.4, alpha=.85)
+                      color=color, marker=marker, linestyle=style, markersize=12 if highlight else 6,
+                      markeredgecolor="black" if highlight else "white", markeredgewidth=.6, linewidth=1.4, alpha=.85)
             return
         for previous, current in zip(visible, visible[1:]):
             first, x0, y0 = previous
@@ -101,26 +103,51 @@ class TargetGeometryPlotter:
                       color=color, linestyle=":" if excursion else style, linewidth=1.4, alpha=.85)
         inside = [(eta, value) for _, eta, value in visible if abs(value) <= radius]
         axis.scatter([eta for eta, _ in inside], [value for _, value in inside], color=color,
-                     marker=marker, s=40, edgecolor="white", linewidth=.6, zorder=3)
+                     marker=marker, s=150 if highlight else 40, edgecolor="black" if highlight else "white",
+                     linewidth=.6, zorder=5 if highlight else 3)
         # Boundary triangles explicitly identify retained samples whose values
         # lie outside the window; never silently present them as in-range scores.
         for direction, boundary_marker in ((1, "^"), (-1, "v")):
             outside = [eta for _, eta, value in visible if direction * value > radius]
             axis.scatter(outside, [direction * radius] * len(outside), color=color,
-                         marker=boundary_marker, s=45, edgecolor="white", linewidth=.6,
+                         marker=boundary_marker, s=65 if highlight else 45,
+                         edgecolor="black" if highlight else "white", linewidth=.6,
                          clip_on=False, zorder=4)
 
-    def plot_metric_pairs(self, results):
-        """One LR row and three score columns, both complete and zoomed views."""
+    def plot_metric_pairs(self, results, selected_target_only=None):
+        """Full grid plus source controls and ONE balanced target-only comparison."""
+        targets = [row for row in results if row["view"] == "target_only" and float(row["eta"]) > 0]
+        if selected_target_only is None and targets:
+            baselines = AblationPlotter.ordinary_by_seed([row for row in results if not float(row["eta"])])
+            if any(row["seed"] not in baselines for row in targets):
+                raise ValueError("Every plotted seed requires its own ordinary LoRA baseline.")
+            selected_target_only = min(targets, key=lambda row: (
+                -sum(self.metric_value(row, baselines[row["seed"]], metric)
+                     for metric in ("test_adapted_target_mse", "test_target_fid")) / 2,
+                float(row["test_target_fid"]), float(row["test_adapted_target_mse"]), str(row.get("model_id", ""))))
+        rows = [row for row in results if row["view"] != "target_only"]
+        if selected_target_only is not None:
+            rows.append(selected_target_only)
+        return self._plot_metric_pairs(rows, ("figure_1_eta_all.png", "figure_2_eta_zoom.png"),
+                                       "Full", highlighted=selected_target_only, all_results=results)
+
+    def plot_target_only_metric_pairs(self, results):
+        rows = [row for row in results if row["view"] in {"ordinary_lora", "target_only"}]
+        return self._plot_metric_pairs(rows, ("figure_3_target_only_eta_all.png", "figure_4_target_only_eta_zoom.png"),
+                                       "Target only", all_results=results)
+
+    def _plot_metric_pairs(self, results, filenames, method_label, highlighted=None, all_results=None):
+        """Shared rendering/normalization/zoom rules for both mode grids."""
         metrics = self.metric_series(results)
         keys = list(next(iter(metrics.values())))
         rates = sorted({key[0] for key in keys})
         batch_sizes = sorted({key[2] for key in keys})
-        colors = {size: plt.get_cmap("tab10")(index % 10) for index, size in enumerate(batch_sizes)}
+        color_sizes = sorted({int(row["geometry_batch_size"]) for row in (all_results or results) if float(row["eta"]) > 0})
+        colors = {size: plt.get_cmap("tab10")(index % 10) for index, size in enumerate(color_sizes)}
         views = [view for view in self.VIEWS if any(key[1] == view for key in keys)]
         radii = {metric: self.zoom_radius(series) for metric, series in metrics.items()}
         paths = []
-        for zoom, filename in ((False, "figure_1_eta_all.png"), (True, "figure_2_eta_zoom.png")):
+        for zoom, filename in zip((False, True), filenames):
             height = 2.6 + 3.6 * len(rates)
             figure, axes = plt.subplots(len(rates), 3, figsize=(17, height), squeeze=False, sharey="col")
             try:
@@ -132,7 +159,8 @@ class TargetGeometryPlotter:
                                     sorted({eta for key, points in series.items() if key[0] == rate for eta, _ in points}))
                         for (series_rate, view, size, _), points in series.items():
                             if series_rate == rate:
-                                self.draw_series(axis, points, colors[size], view, set(selected), radius)
+                                self.draw_series(axis, points, colors[size], view, set(selected), radius,
+                                                 highlight=highlighted is not None and view == "target_only")
                         axis.axhline(0, color="0.4", linestyle=":", linewidth=1)
                         axis.set(xscale="log", xlabel="Regularization weight η",
                                  ylabel=f"{title} improvement (%) ↑", title=f"{title} · dual learning rate = {rate:g}")
@@ -148,16 +176,19 @@ class TargetGeometryPlotter:
                             axis.set_ylim(-radius, radius)
                         axis.grid(color="0.9", linestyle="--", linewidth=.7)
                 handles = [Line2D([0], [0], color=colors[size], marker="o", label=f"B = {size}") for size in batch_sizes]
-                handles += [Line2D([0], [0], color="0.3", marker=self.VIEWS[view][1],
-                                   linestyle=self.VIEWS[view][2], label=self.VIEWS[view][0]) for view in views]
+                handles += [Line2D([0], [0], color="0.3",
+                                   marker="*" if highlighted is not None and view == "target_only" else self.VIEWS[view][1],
+                                   linestyle="None" if highlighted is not None and view == "target_only" else self.VIEWS[view][2],
+                                   label="Selected target only" if highlighted is not None and view == "target_only" else self.VIEWS[view][0]) for view in views]
                 handles.append(Line2D([0], [0], color="0.4", linestyle=":", label="Ordinary LoRA (0%)"))
                 figure.legend(handles=handles, loc="upper center", bbox_to_anchor=(.5, 1 - .4 / height),
                               ncol=min(len(handles), 8), frameon=False)
-                figure.suptitle("Target geometry: improvement over ordinary LoRA" + (" · automatic zoom" if zoom else " · all models"))
+                figure.suptitle(f"Target geometry · {method_label}: improvement over ordinary LoRA" + (" · automatic zoom" if zoom else " · all models"))
                 figure.text(.5, .85 / height, "Improvement (%) = 100 × (ordinary LoRA score − model score) / ordinary LoRA score.  Positive is better; 0% is unregularized LoRA.", ha="center", fontsize=9)
                 figure.text(.5, .60 / height, "Scores: held-out target MSE, source MSE and target FID. Each point is one seed, normalized to its own LoRA baseline; lines connect the same seed/view/B.", ha="center", fontsize=9)
                 caption = ("Per metric: symmetric range = |best mean improvement across seeds| + 5 percentage points, shared across learning rates."
-                           if zoom else "Color: geometry batch size B. Marker/line style: full, target-only or source-only view. All evaluated eta values are shown.")
+                           if zoom else "Color: geometry batch size B. Lines: individual seeds. A star marks the balanced target-only selection at its measured LR/eta."
+                           if highlighted is not None else "Color: geometry batch size B. Lines: individual seeds. All evaluated eta values for this mode are shown.")
                 figure.text(.5, .35 / height, caption, ha="center", fontsize=9)
                 if zoom:
                     figure.text(.5, .10 / height, "Eta is omitted per panel only if every sample is outside its window. Boundary triangles mark off-scale values; dotted segments touch or skip off-scale samples.", ha="center", fontsize=8.5)
@@ -178,13 +209,21 @@ class TargetGeometryPlotter:
         return (f"η={float(selected['eta']):g}, B={int(selected['geometry_batch_size'])}, "
                 f"dual rate={float(selected['dual_learning_rate']):g}, seed={int(selected['seed'])}")
 
-    def plot_qualitative(self, results):
-        selected = self.selected_model_label(results["selected_model"])
-        columns = [("base", "Source VAE"), ("lora", "Ordinary LoRA"), ("regularized", "Target geometry")]
+    def plot_qualitative(self, results, view=None):
+        view = view or results.get("view", results["selected_model"].get("view", "full"))
+        if view not in {"full", "target_only"}:
+            raise ValueError("Qualitative figures require full or target_only mode.")
+        first_figure = 5 if view == "full" else 8
+        method_label = self.VIEWS[view][0]
+        columns = [("base", "Source VAE"), ("lora", "Ordinary LoRA"), ("regularized", f"{method_label} geometry")]
         paths = []
         for split in ("source", "target", "generation"):
             data = results[split]
             is_generation = split == "generation"
+            selection = results.get("generation_selected_model", results["selected_model"]) if is_generation else results["selected_model"]
+            selected = self.selected_model_label(selection)
+            rule = ("Lowest test target FID" if is_generation else "Lowest validation target MSE"
+                    if view == "full" else "Equal-weight target MSE/FID percent improvement; ties prefer lower FID")
             split_columns = columns if is_generation else [("input", "Input"), *columns]
             count = len(data["base"])
             if count == 0 or any(len(data[key]) != count for key, _ in split_columns):
@@ -197,25 +236,27 @@ class TargetGeometryPlotter:
                         AblationPlotter.show_image(axes[row, column], image)
                 if is_generation:
                     title = "Prior generation using the same latent vectors"
-                    filename = "figure_5_generations.png"
+                    filename = f"figure_{first_figure + 2}_generations_{view}.png"
                     caption = f"One shared set of N(0, I) latent vectors for every model; visual seed = {self.config.get('visual_seed', 123)}."
                 else:
                     label = self.config.get(f"{split}_label", split.title())
                     title = f"{label} reconstructions"
-                    filename = f"figure_{3 if split == 'source' else 4}_{split}_reconstructions.png"
+                    filename = f"figure_{first_figure if split == 'source' else first_figure + 1}_{split}_reconstruction_{view}.png"
                     caption = "Identical held-out inputs across columns; reconstruction uses each encoder's posterior mean."
                 # Reserve physical header/footer space even for a one-row grid.
                 height = figure.get_figheight()
-                figure.suptitle(title, fontsize=15, y=1 - .10 / height, va="top")
-                figure.text(.5, 1 - .45 / height, f"Selected by validation target MSE: {selected}", ha="center", va="top", fontsize=10)
+                figure.suptitle(f"{title} · {method_label}", fontsize=15, y=1 - .10 / height, va="top")
+                figure.text(.5, 1 - .42 / height, selected, ha="center", va="top", fontsize=10)
+                figure.text(.5, 1 - .66 / height, rule, ha="center", va="top", fontsize=9)
                 figure.text(.5, .18 / height, caption, ha="center", va="center", fontsize=9)
-                figure.tight_layout(rect=(0, .40 / height, 1, 1 - .9 / height))
+                figure.tight_layout(rect=(0, .40 / height, 1, 1 - 1.05 / height))
                 path = self.output_dir / filename
                 figure.savefig(path, dpi=180)
                 paths.append(path)
             finally:
                 plt.close(figure)
-        for filename in ("target_reconstructions.png", "figure_5_source_reconstructions.png",
+        for filename in ("target_reconstructions.png", "figure_3_source_reconstructions.png",
+                         "figure_4_target_reconstructions.png", "figure_5_generations.png", "figure_5_source_reconstructions.png",
                          "figure_6_target_reconstructions.png", "figure_7_generations.png"):
             (self.output_dir / filename).unlink(missing_ok=True)
         return paths

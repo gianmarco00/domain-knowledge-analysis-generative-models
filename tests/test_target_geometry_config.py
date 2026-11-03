@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,39 +10,101 @@ from domain_knowledge_analysis.utils import build_run_name, load_config
 from test_target_geometry import ToyModel, toy_data
 
 
-@pytest.mark.parametrize("dataset", ["mnist", "ellipsis"])
-def test_new_configs_preserve_core_settings_and_generate_expected_sweep(dataset, tmp_path):
-    original = load_config(f"config/lora_vae_{dataset}.yaml")
-    base = load_config(f"config/lora_vae_{dataset}_target_geometry.yaml")
-    for key in original:
-        if key not in {"lora", "experiment"}:
-            assert base[key] == original[key]
-    for key in original["lora"]:
-        if key != "regularizer":
-            assert base["lora"][key] == original["lora"][key]
-    ablation = load_config(f"config/ablation_vae_{dataset}_target_geometry.yaml")["ablation"]
-    runs = generate_target_geometry_runs(base, ablation, tmp_path)
-    assert len(runs) == 63
-    assert len({run["model_id"] for run in runs}) == 63
-    assert len([run for run in runs if run["eta"] == 0]) == 3
-    assert {run["view"] for run in runs} == {"full", "target_only", "source_only", "ordinary_lora"}
-    full = [run for run in runs if run["view"] == "full"]
-    assert len(full) == 54
+@pytest.mark.parametrize("dataset", ["mnist", "ellipsis", "mnist_emnist"])
+def test_paired_sweep_preserves_base_settings_and_covers_every_combination(dataset, tmp_path):
     from itertools import product
-    assert {(run["seed"], run["eta"], run["geometry_batch_size"], run["dual_learning_rate"]) for run in full} == set(product(
-        ablation["seeds"], ablation["eta_values"], ablation["geometry_batch_sizes"], ablation["dual_learning_rates"]))
+    sweep_config = load_config(f"config/ablation_vae_{dataset}_target_geometry.yaml")
+    base = load_config(sweep_config["base_config"])
+    ablation = sweep_config["ablation"]
+    runs = generate_target_geometry_runs(base, ablation, tmp_path)
+    grid = set(product(ablation["seeds"], ablation["eta_values"],
+                       ablation["geometry_batch_sizes"], ablation["dual_learning_rates"]))
+    assert len(runs) == len(ablation["seeds"]) + 2 * len(grid) + len(ablation["seeds"]) * len(ablation.get("controls", []))
+    assert len({run["model_id"] for run in runs}) == len(runs)
+    assert len([run for run in runs if run["eta"] == 0]) == len(ablation["seeds"])
+    assert {run["view"] for run in runs} == {"full", "target_only", "source_only", "ordinary_lora"}
+    for view in ("full", "target_only"):
+        assert {(run["seed"], run["eta"], run["geometry_batch_size"], run["dual_learning_rate"])
+                for run in runs if run["view"] == view} == grid
     for run in runs:
         config = load_config(run["config_path"])
         for key in ("training", "model", "loss", "dataloader", "optimizer", "lr_scheduler"):
             assert config[key] == base[key]
+        for key in base["lora"]:
+            if key != "regularizer":
+                assert config["lora"][key] == base["lora"][key]
         if run["eta"]:
             assert config["lora"]["regularizer"]["eta"] == run["eta"]
+            assert config["lora"]["regularizer"]["view"] == run["view"]
             assert "transformations" not in config["lora"]["regularizer"]
         else:
             assert config["lora"]["regularizer"] is None
     assert "target_geometry_full" in build_run_name(base)
-    # Regeneration produces stable IDs and no duplicate baseline per batch size.
     assert [run["model_id"] for run in generate_target_geometry_runs(base, ablation, tmp_path)] == [run["model_id"] for run in runs]
+
+
+def test_old_target_controls_deduplicate_and_off_grid_controls_remain_paired(tmp_path):
+    base = load_config("config/lora_vae_mnist_target_geometry.yaml")
+    sweep = {"seeds": [42], "eta_values": [10.], "geometry_batch_sizes": [64],
+             "dual_learning_rates": [.01], "controls": [
+                 {"view": "target_only", "eta": 10., "geometry_batch_size": 64},
+                 {"view": "target_only", "eta": 100., "geometry_batch_size": 128}]}
+    runs = generate_target_geometry_runs(base, sweep, tmp_path)
+    assert len(runs) == 5  # One baseline and two paired settings, no duplicate.
+    full = {(row["eta"], row["geometry_batch_size"]) for row in runs if row["view"] == "full"}
+    target = {(row["eta"], row["geometry_batch_size"]) for row in runs if row["view"] == "target_only"}
+    assert full == target == {(10., 64), (100., 128)}
+
+
+def test_expanding_target_grid_reuses_completed_models_and_old_training_ids(tmp_path, monkeypatch):
+    from domain_knowledge_analysis.experiments.ablation_utils import training_config_id
+    import domain_knowledge_analysis.experiments.ablation as worker_module
+    base = load_config("config/lora_vae_mnist_target_geometry.yaml")
+    sweep = {"seeds": [42], "eta_values": [10., 100.], "geometry_batch_sizes": [64],
+             "dual_learning_rates": [.01]}
+    # Construct pre-change full runs and the old single target-only control
+    # directly from the training config; plot/grid changes must keep their IDs.
+    expected = set()
+    for eta, view in ((0., "ordinary_lora"), (10., "full"), (100., "full"), (100., "target_only")):
+        config = deepcopy(base)
+        if eta == 0:
+            config["lora"]["regularizer"] = None
+        else:
+            config["lora"]["regularizer"].update(eta=eta, view=view, geometry_batch_size=64, dual_learning_rate=.01)
+        expected.add(training_config_id(config))
+    runs = generate_target_geometry_runs(base, sweep, tmp_path)
+    assert expected <= {row["model_id"] for row in runs}
+    previous_configs = {}
+    for row in runs:
+        if row["model_id"] in expected:
+            checkpoint_dir = row["model_dir"] / "checkpoints"
+            checkpoint_dir.mkdir()
+            for filename in ("best.pt", "last.pt"):
+                (checkpoint_dir / filename).write_bytes(b"completed")
+            previous_configs[row["model_id"]] = row["config_path"].read_bytes()
+    runs = generate_target_geometry_runs(base, sweep, tmp_path)
+    for row in runs:
+        if row["model_id"] in previous_configs:
+            assert row["config_path"].read_bytes() == previous_configs[row["model_id"]]
+    trained = []
+    def train(config_path, **kwargs):
+        model_dir = Path(config_path).parent
+        trained.append(model_dir)
+        checkpoint_dir = model_dir / "checkpoints"
+        checkpoint_dir.mkdir()
+        for filename in ("best.pt", "last.pt"):
+            (checkpoint_dir / filename).write_bytes(b"new target-only model")
+    monkeypatch.setattr(worker_module, "train_ablation_model", train)
+    ablation = TargetGeometryAblation.__new__(TargetGeometryAblation)
+    ablation.runs = runs
+    ablation.ablation_config = {"parallel_models": 1}
+    ablation.prepare_dataset_caches = lambda *_: None
+    ablation.train_models()
+    assert trained == [row["model_dir"] for row in runs if row["model_id"] not in expected]
+    assert len(trained) == 1
+    ablation.prepare_dataset_caches = lambda *_: pytest.fail("All runs are now completed")
+    ablation.train_models()
+    assert len(trained) == 1
 
 
 def test_geometry_result_metadata_roundtrip(tmp_path):
@@ -144,7 +207,7 @@ def test_ablation_scoring_selection_and_cached_metadata(monkeypatch, tmp_path):
     ablation.prepare_dataset_caches = lambda *_: pytest.fail("Completed models must not be retrained")
     ablation.prepare_fid = lambda _: ("reference", "fid-key")
     selections = []
-    ablation.plot_reconstructions = selections.append
+    ablation.plot_selected_models = lambda models, *_args, **_kwargs: selections.append(models)
     scored = []
     def evaluate(experiment, *_):
         scored.append(experiment)
@@ -168,7 +231,8 @@ def test_ablation_scoring_selection_and_cached_metadata(monkeypatch, tmp_path):
                        checkpoint.with_suffix(".regularizer.pt"))
     first = ablation.run()
     assert len(scored) == 3
-    assert selections[-1]["view"] == "full"
+    assert selections[-1]["full_reconstruction"]["view"] == "full"
+    assert selections[-1]["target_only_reconstruction"]["view"] == "target_only"
     assert (tmp_path / "results" / "summary.csv").exists()
     assert (tmp_path / "results" / "selected_model.yaml").exists()
     second = ablation.run()
