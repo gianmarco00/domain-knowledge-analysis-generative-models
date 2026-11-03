@@ -271,6 +271,76 @@ the sweep. The implementation's tests establish mathematical witnesses and
 gradient plumbing; they do not establish target improvement, arbitrary-domain
 feasibility, escape from exact collapse or rank-8 realizability.
 
+## Nonfinite training failures
+
+The pulled Thor events and checkpoint have now been inspected. See
+[the LR=0.01 investigation](target_geometry_lr001_failure_analysis.md) for the
+measured evidence, reconstructed failure-window denominator audit and operation
+tracing. The finite epoch-32 checkpoint and successful local
+continuation do not establish the exact cause of the epoch-34 GPU failure.
+
+For the MNIST→EMNIST Bernoulli configuration, a `Nonfinite target geometry
+distortion` error with valid input energy means the adapted reconstruction
+contains NaNs. Real inputs and sigmoid decoder means lie in [0,1]. With B=64
+and 784 pixels, the numerator is bounded by `4 * B**2 * 784**2`; divided by
+energy strictly above `1e-12`, the distortion is below about `1.01e22`, far below
+the float32 limit. Finite normalized image means therefore cannot explain that
+failure through Gram overflow. The failing run's actual tensors are needed to
+identify the first nonfinite network operation.
+
+One reproducible upstream mechanism is ordinary VAE numerical divergence:
+`KL = .5 * sum(exp(log_variance) + mean**2 - 1 - log_variance)`. In float32,
+`exp(log_variance)` overflows around 88.72, while posterior means and the
+deterministic geometry can still be finite. Previously the geometry-only
+check allowed an invalid VAE loss/gradient to reach Adam; a subsequent batch
+then failed the geometry check because its weights/outputs were already NaN.
+A finite loss can also have nonfinite backward gradients, so forward checks
+alone are insufficient. Tests reproduce this causal chain; they do not claim
+to recover the missing intermediate tensors from the reported Thor run.
+
+The target-geometry trainer now checks the actual VAE and primal objectives,
+both geometry values, and every computed trainable gradient **before** the
+optimizer/dual update. Healthy updates retain their existing arithmetic.
+The guard checks elementwise finiteness, not a float32 gradient norm that could
+overflow for otherwise finite gradients. It does not clip gradients, replace
+NaNs, change Gram denominators, skip batches or alter eta, q, c_s or the loss.
+Gradient checks run on the tensor device and transfer only a scalar validity
+flag on the healthy path; detailed CPU diagnostics run only after a failure.
+Parameters and Adam state are also checked immediately after the step, before
+dual ascent. Reusable device buffers preserve the pre-step values for replay.
+
+On failure, `checkpoints/nonfinite.pt` separately records model/source-decoder
+weights, gradients, optimizer and regularizer states, the failing image batches,
+actual VAE forward outputs, RNG/sampler state and a `report`. The report names
+the stage, epoch/batch, nonfinite parameters/Adam state, posterior variance,
+decoder logits, image means and first nonfinite geometry activation. Existing
+best/last checkpoints are preserved. This is forensic state, not an automatic
+resume checkpoint. Pre-forward RNG state permits replay of the stochastic VAE
+pass on copied modules. Failure-only ATen tracing reports the first nonfinite
+forward/backward operation and its inputs. An optimizer failure instead replays
+Adam from the captured pre-step values. Replays preserve the live RNG, model
+and gradients and explicitly report when a failure does not reproduce.
+
+The reported run used Adam LR **0.01**, ten times the original MNIST→EMNIST
+YAML's **0.001**, and failed before its scheduler starts reducing LR after
+epoch 50. The standalone target-only configuration retains the requested
+**0.01** learning rate. Run it from the original finite source checkpoint:
+
+```bash
+python scripts/run_target_geometry.py config/lora_vae_mnist_emnist_target_only.yaml
+```
+
+It retains eta=100, B=64, dual LR=0.01, both calibration/validation counts and
+the complete target-only regularizer, using model Adam LR=0.01. The checks
+detect invalid objectives/gradients before the update; they do not stabilize
+Adam, automatically lower its learning rate, or guarantee that the run will
+complete. When all values are finite, the loss, gradients, Adam state, dual
+update and sampler follow the original update rules, including at LR=0.01.
+An unstable run still stops and preserves its failure evidence. No clipping,
+loss/variance clamping or denominator epsilon has been introduced. The loss
+numbers on a progress bar describe the previous
+completed epoch, not the failing minibatch.
+
 ## Performance and equivalence audit
 
 The target-geometry trainer has execution optimizations that preserve its

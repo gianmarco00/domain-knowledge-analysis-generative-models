@@ -6,6 +6,10 @@ import math
 import torch
 
 from .trainer import Trainer
+from .target_geometry_numerics import (
+    OptimizerStepSnapshot, capture_rng, diagnose_geometry, invalid_named_tensors,
+    tensor_summary, trace_failure, trace_primal_failure,
+)
 from domain_knowledge_analysis.regularizers.target_geometry import (
     GeometryBatchSampler, centered_gram, input_gram_energy, positive_integer,
 )
@@ -47,6 +51,10 @@ class TargetGeometryTrainer(Trainer):
         self.geometry_seed = geometry_seed
         self._cuda = torch.device(self.device).type == "cuda"
         self._validation_geometry = None
+        self._trainable_parameters = tuple((name, parameter) for name, parameter in self.model.named_parameters()
+                                           if parameter.requires_grad)
+        self._batch_rng_state = None
+        self._optimizer_snapshot = OptimizerStepSnapshot()
         self.geometry_sampler = GeometryBatchSampler(self.train_dataloader.dataset, geometry_batch_size, geometry_seed)
         # Validate availability now; use the identical batch size in all splits.
         GeometryBatchSampler(self.validate_dataloader.dataset, geometry_batch_size, geometry_seed + 1)
@@ -85,13 +93,92 @@ class TargetGeometryTrainer(Trainer):
                 values[loser] = values[loser].detach()
         return values["worst_distortion"]
 
+    def _optimizer_tensors(self):
+        for name, parameter in self._trainable_parameters:
+            yield name, parameter
+            for key, value in self.optimizer.state.get(parameter, {}).items():
+                if isinstance(value, torch.Tensor):
+                    yield f"{name}.{key}", value
+
+    def _numerical_failure(self, stage, step, images, geometry_images, forward, scalars,
+                           invalid_gradients=(), invalid_updated_tensors=()):
+        """Preserve the first invalid computation and trace it on copies only."""
+        logits, mean, log_variance = forward
+        report = {"stage": stage, "epoch": len(self.history["train_loss"]) + 1, "batch": step,
+                  "torch_version": str(torch.__version__), "cuda_version": torch.version.cuda,
+                  "view": self.regularizer.view, "eta": self.regularizer.eta,
+                  "dual_multiplier": self.regularizer.multiplier,
+                  "learning_rates": [group["lr"] for group in self.optimizer.param_groups],
+                  "scalars": scalars, "nonfinite_gradients": list(invalid_gradients),
+                  "nonfinite_updated_tensors": list(invalid_updated_tensors),
+                  "nonfinite_parameters": invalid_named_tensors(self.model.named_parameters()),
+                  "training_decoder_logits": tensor_summary(logits),
+                  "training_posterior_mean": tensor_summary(mean),
+                  "training_posterior_log_variance": tensor_summary(log_variance),
+                  "training_posterior_variance": tensor_summary(log_variance.detach().exp()),
+                  "geometry": diagnose_geometry(self.regularizer, geometry_images)}
+        report["nonfinite_optimizer_state"] = [
+            f"{name}.{key}" for name, parameter in self._trainable_parameters
+            for key, value in self.optimizer.state.get(parameter, {}).items()
+            if isinstance(value, torch.Tensor) and not torch.isfinite(value).all()]
+        if self._batch_rng_state is not None:
+            if stage == "nonfinite_optimizer":
+                replay = self._optimizer_snapshot.replay_optimizer(self.optimizer)
+                def optimizer_step(trace):
+                    trace.phase = "optimizer_step"
+                    replay.step()
+                report["operation_trace"] = trace_failure(optimizer_step, self._batch_rng_state)
+            else:
+                report["operation_trace"] = trace_primal_failure(
+                    self.regularizer, self.loss, images, geometry_images, self._batch_rng_state)
+        snapshot = None
+        if self.checkpoint_manager is not None:
+            snapshot = self.checkpoint_manager.checkpoint_path("nonfinite.pt")
+            try:
+                snapshot.parent.mkdir(parents=True, exist_ok=True)
+                torch.save({"report": report, "model_state_dict": self.model.state_dict(),
+                            "source_decoder_state_dict": self.regularizer.source_decoder.state_dict(),
+                            "config": getattr(self.checkpoint_manager, "config", None),
+                            "optimizer_state_dict": self.optimizer.state_dict(),
+                            "regularizer": self.regularizer.state_dict(),
+                            "gradients": {name: parameter.grad.detach().cpu() for name, parameter in self._trainable_parameters
+                                          if parameter.grad is not None},
+                            "training_images": images.detach().cpu(), "geometry_images": geometry_images.detach().cpu(),
+                            "training_forward": {"logits": logits.detach().cpu(), "mean": mean.detach().cpu(),
+                                                 "log_variance": log_variance.detach().cpu()},
+                            "geometry_sampler_state": self.geometry_sampler.generator.get_state(),
+                            "pre_forward_rng_state": self._batch_rng_state,
+                            "pre_optimizer_state": (self._optimizer_snapshot.payload(self._trainable_parameters)
+                                                    if stage == "nonfinite_optimizer" else None),
+                            "torch_rng_state": torch.random.get_rng_state(),
+                            "cuda_rng_state": (torch.cuda.get_rng_state(self.device)
+                                               if torch.device(self.device).type == "cuda" else None)}, snapshot)
+            except (OSError, RuntimeError) as error:
+                report["snapshot_error"] = str(error)
+                snapshot = None
+        invalid = list(invalid_gradients) or list(invalid_updated_tensors) or [
+            name for name, value in scalars.items() if not math.isfinite(value)]
+        first_bad = {key: value["module"] for key, value in report["geometry"].items()
+                     if key.endswith("first_nonfinite_activation")}
+        position = "during optimizer.step()" if stage == "nonfinite_optimizer" else "before optimizer.step()"
+        update = ("The optimizer produced invalid tensors; its pre-step state was captured. No dual update was applied."
+                  if stage == "nonfinite_optimizer" else "No optimizer or dual update was applied to this batch.")
+        operation = report.get("operation_trace", {}).get("operator", "not reproduced")
+        raise ValueError(f"Target geometry numerical failure ({stage}) {position}: {invalid}. "
+                         f"epoch={report['epoch']}, batch={step}, view={self.regularizer.view}, "
+                         f"lr={report['learning_rates']}, eta={self.regularizer.eta:g}, "
+                         f"lambda={self.regularizer.multiplier:g}; first nonfinite geometry activations={first_bad}. "
+                         f"First nonfinite replay operation={operation}. {update} "
+                         f"Diagnostic snapshot: {snapshot or report}.")
+
     def train_epoch(self):
         self.model.train()
         base_total, samples, steps = 0.0, 0, 0
         components, geometry = defaultdict(float), defaultdict(float)
-        for batch in self.train_dataloader:
+        for step, batch in enumerate(self.train_dataloader, 1):
             images = batch[0].to(self.device)
             self.optimizer.zero_grad()
+            self._batch_rng_state = capture_rng(self.device)
             logits, mean, log_variance = self.model(images)
             base_loss = self.loss(images, logits, mean, log_variance)
             monitors = {"vae_loss": base_loss}
@@ -103,18 +190,30 @@ class TargetGeometryTrainer(Trainer):
             # VAE minibatch size, remainder handling and KL objective untouched.
             # Still evaluate both views and update the dual when lambda=0, but
             # an identically zero coefficient needs no geometry autograd graph.
+            geometry_images = self.geometry_sampler.sample(self.device)
             with torch.set_grad_enabled(self.regularizer.multiplier != 0):
-                values = self.regularizer.distortions(self.geometry_sampler.sample(self.device),
-                                                      check_finite=not self._cuda)
-            host = self._host_values({**monitors, **values})
-            if self._cuda and any(not math.isfinite(host[name]) for name in values):
-                # Use the already-required scalar read for dual ascent/active-view
-                # selection; reject invalid outputs before backward or Adam updates.
-                raise ValueError("Nonfinite target geometry distortion.")
+                values = self.regularizer.distortions(geometry_images, check_finite=False)
+            objective = base_loss.detach() + self.regularizer.primal_loss(values["worst_distortion"].detach())
+            host = self._host_values({**monitors, **values, "primal_objective": objective})
+            # A logging-only component sum can overflow even when the actual
+            # mean objective is finite; guard only quantities used by the step.
+            if any(not math.isfinite(host[name]) for name in ("vae_loss", "primal_objective", *values)):
+                self._numerical_failure("nonfinite_forward", step, images, geometry_images,
+                                        (logits, mean, log_variance), host)
             worst = self._active_geometry(values, host)
             loss = base_loss + self.regularizer.primal_loss(worst)
             loss.backward()
+            invalid_gradients = invalid_named_tensors((name, parameter.grad) for name, parameter in self._trainable_parameters)
+            if invalid_gradients:
+                self._numerical_failure("nonfinite_backward", step, images, geometry_images,
+                                        (logits, mean, log_variance), host, invalid_gradients)
+            self._optimizer_snapshot.capture(self.optimizer)
             self.optimizer.step()
+            invalid_updated_tensors = invalid_named_tensors(self._optimizer_tensors())
+            if invalid_updated_tensors:
+                self._numerical_failure("nonfinite_optimizer", step, images, geometry_images,
+                                        (logits, mean, log_variance), host,
+                                        invalid_updated_tensors=invalid_updated_tensors)
             self.regularizer.update_dual(host["worst_distortion"])
 
             base_total += host["vae_loss"] * len(images)

@@ -62,14 +62,15 @@ def reference_train_epoch(trainer):
 @pytest.mark.parametrize("scale", [.6, .9, 1.])  # target worse, exact tie, source worse
 @pytest.mark.parametrize("initial_dual", [0., .4])
 @pytest.mark.parametrize("view", ["full", "target_only", "source_only"])
-def test_training_loss_gradients_adam_momentum_dual_and_sampler_match_reference(scale, initial_dual, view):
+@pytest.mark.parametrize("learning_rate", [1e-4, .01])
+def test_training_loss_gradients_adam_momentum_dual_and_sampler_match_reference(scale, initial_dual, view, learning_rate):
     optimized, reference = make_trainer(), make_trainer()
     for trainer in (optimized, reference):
         with torch.no_grad():
             trainer.model.decoder.scale.fill_(scale)
         trainer.regularizer.dual_fraction = initial_dual
         trainer.regularizer.view = view
-        trainer.optimizer = torch.optim.Adam(trainer.model.parameters(), lr=1e-4)
+        trainer.optimizer = torch.optim.Adam(trainer.model.parameters(), lr=learning_rate)
     # Multiple epochs exercise Adam's state, changing active views and lambda=0.
     for _ in range(3):
         expected_loss = reference_train_epoch(reference)
