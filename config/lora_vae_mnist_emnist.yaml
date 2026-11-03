@@ -21,7 +21,7 @@ dataloader:
 
 training:
   epochs: 160
-  learning_rate: 0.001
+  learning_rate: 0.01
 
 loss:
   name: vae_loss
@@ -91,7 +91,7 @@ lora:
     shape: [1, 28, 28]
   regularizer:
     mode: target_geometry
-    view: full
+    view: target_only
     eta: 100.0
     geometry_batch_size: 64
     calibration_batches: 128
