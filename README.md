@@ -19,6 +19,24 @@ full official EMNIST archive through torchvision; subsequent loads reuse it.
 Open [the visualization notebook](notebooks/visualize_emnist_dataset.ipynb)
 for class counts, multiple samples per letter, and a MNIST comparison.
 
+For uppercase letters only, select `upper_emnist`. It keeps the same ten
+letters from EMNIST **ByClass**, where uppercase and lowercase have separate
+labels, and excludes all lowercase and digit classes. This larger source split
+provides 89,033 training-pool images and 14,868 official test images. The default
+80/20 split yields **71,226 training**, **17,807 validation**, and **14,868 test**
+images. The class counts are unequal; all selected samples are retained.
+In the visualization notebook, set `DATASET = "upper_emnist"` or
+`DATASET = "emnist"` and run all cells to switch between uppercase and mixed case.
+
+[The uppercase LoRA YAML](config/lora_vae_mnist_upper_emnist.yaml) adapts the
+same MNIST source model to `upper_emnist`. It copies the current mixed-case
+EMNIST YAML's model, training and target-geometry regularizer settings. Run it
+from the repository root:
+
+```bash
+./.venv/bin/python -c 'from domain_knowledge_analysis.experiments import Experiment; Experiment("config/lora_vae_mnist_upper_emnist.yaml").score_adaptation()'
+```
+
 For MNIST-to-EMNIST LoRA, keep the top-level `dataset.name: mnist` as the
 source and select the target in the existing LoRA block:
 

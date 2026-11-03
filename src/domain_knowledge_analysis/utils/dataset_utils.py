@@ -45,6 +45,7 @@ TRANSFORMED_DATASET_CACHE_VERSION = 5
 LINES_DATASET_VERSION = 2
 ELLIPSIS_DATASET_VERSION = 7
 EMNIST_DATASET_VERSION = 1
+UPPER_EMNIST_DATASET_VERSION = 1
 
 # Alphabetical order defines the experiment's stable, zero-based class labels.
 # Digit resemblance is a visual heuristic; the Letters split mixes letter case.
@@ -543,11 +544,12 @@ def create_dataset(config, dataset_name, train):
             transform=create_transform(dataset_name),
         )
 
-    elif dataset_name == "emnist":
+    elif dataset_name in {"emnist", "upper_emnist"}:
         dataset = create_emnist_dataset(
             dataset_dir=dataset_dir,
             train=train,
             transform=create_transform(dataset_name),
+            uppercase_only=dataset_name == "upper_emnist",
         )
 
     elif dataset_name in MEDMNIST_DATASETS:
@@ -627,7 +629,7 @@ def resolve_target_dataset(config, target_config):
     target_name = target_config.get("name", "").lower()
     target_name = DATASET_ALIASES.get(target_name, target_name)
     supported_datasets = set(TORCHVISION_DATASETS) | MEDMNIST_DATASETS | {
-        "emnist", "lines_dataset", "vertical_lines_dataset", "ellipsis_dataset",
+        "emnist", "upper_emnist", "lines_dataset", "vertical_lines_dataset", "ellipsis_dataset",
     }
     if target_name in supported_datasets:
         dataset_config = {**config["dataset"], "name": target_name}
@@ -756,6 +758,8 @@ def create_transformed_datasets(
         cache_version += f"_ellipsis_{ELLIPSIS_DATASET_VERSION}"
     elif dataset_name == "emnist":
         cache_version += f"_emnist_{EMNIST_DATASET_VERSION}"
+    elif dataset_name == "upper_emnist":
+        cache_version += f"_upper_emnist_{UPPER_EMNIST_DATASET_VERSION}"
 
     cache_dir = (
         dataset_dir
@@ -949,7 +953,7 @@ def create_calibration_dataloader(config, dataset_name):
 
 
 def create_transform(dataset_name):
-    if dataset_name == "emnist":
+    if dataset_name in {"emnist", "upper_emnist"}:
         return transforms.Compose([
             transforms.ToTensor(),
             CorrectEMNISTOrientation(),
@@ -1080,24 +1084,27 @@ def create_torchvision_dataset(
     )
 
 
-def create_emnist_dataset(dataset_dir, train, transform):
-    """Keep ten digit-like EMNIST Letters classes and relabel them from 0 to 9.
+def create_emnist_dataset(dataset_dir, train, transform, uppercase_only=False):
+    """Keep ten digit-like EMNIST letter classes and relabel them from 0 to 9.
 
-    The official train/test split is preserved. Uppercase and lowercase variants
-    share a class; the full selected pools contain 48,000/8,000 images.
+    Letters merges case into balanced classes. Uppercase mode uses ByClass,
+    which labels uppercase and lowercase separately, and keeps only capitals.
+    Both preserve the official train/test split and all selected samples.
     """
     dataset = datasets.EMNIST(
         root=dataset_dir,
-        split="letters",
+        split="byclass" if uppercase_only else "letters",
         train=train,
         download=True,
         transform=transform,
     )
 
-    # EMNIST Letters uses 1=A, ..., 26=Z, rather than zero-based labels.
-    label_map = torch.full((27,), -1, dtype=torch.long)
+    # Letters is 1-based; ByClass includes digits and separate upper/lowercase
+    # labels. Resolve the exact source classes before replacing class metadata.
+    label_map = torch.full((len(dataset.classes),), -1, dtype=torch.long)
     for label, letter in enumerate(EMNIST_LETTERS):
-        label_map[ord(letter) - ord("A") + 1] = label
+        source_letter = letter if uppercase_only else letter.lower()
+        label_map[dataset.classes.index(source_letter)] = label
     targets = label_map[dataset.targets]
     selected = targets >= 0
     dataset.data = dataset.data[selected]

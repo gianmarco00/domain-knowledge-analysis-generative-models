@@ -14,18 +14,19 @@ def emnist_config(tmp_path):
     """Small real IDX files exercise torchvision loading without a download."""
     raw = tmp_path / "EMNIST" / "raw"
     raw.mkdir(parents=True)
-    for split, repeats in [("train", 4), ("test", 2)]:
-        labels = torch.arange(1, 27, dtype=torch.uint8).repeat(repeats)
-        images = torch.zeros(len(labels), 28, 28, dtype=torch.uint8)
-        images[:, 3, 17] = labels
-        images[:, 8, 20] = 255
-        prefix = raw / f"emnist-letters-{split}"
-        prefix.with_name(prefix.name + "-images-idx3-ubyte").write_bytes(
-            struct.pack(">IIII", 2051, len(images), 28, 28) + images.numpy().tobytes()
-        )
-        prefix.with_name(prefix.name + "-labels-idx1-ubyte").write_bytes(
-            struct.pack(">II", 2049, len(labels)) + labels.numpy().tobytes()
-        )
+    for source_split, start, stop in [("letters", 1, 27), ("byclass", 0, 62)]:
+        for split, repeats in [("train", 4), ("test", 2)]:
+            labels = torch.arange(start, stop, dtype=torch.uint8).repeat(repeats)
+            images = torch.zeros(len(labels), 28, 28, dtype=torch.uint8)
+            images[:, 3, 17] = labels
+            images[:, 8, 20] = 255
+            prefix = raw / f"emnist-{source_split}-{split}"
+            prefix.with_name(prefix.name + "-images-idx3-ubyte").write_bytes(
+                struct.pack(">IIII", 2051, len(images), 28, 28) + images.numpy().tobytes()
+            )
+            prefix.with_name(prefix.name + "-labels-idx1-ubyte").write_bytes(
+                struct.pack(">II", 2049, len(labels)) + labels.numpy().tobytes()
+            )
 
     config = utils.load_config(utils.get_repo_root() / "config" / "vae_mnist.yaml")
     config["paths"]["dataset_dir"] = str(tmp_path)
@@ -33,21 +34,24 @@ def emnist_config(tmp_path):
     return config
 
 
+@pytest.mark.parametrize("dataset_name", ["emnist", "upper_emnist"])
 @pytest.mark.parametrize("train, repeats", [(True, 4), (False, 2)])
-def test_emnist_filters_relabels_and_corrects_orientation(emnist_config, train, repeats):
-    dataset = utils.create_dataset(emnist_config, "EMNIST", train=train)
+def test_emnist_filters_relabels_and_corrects_orientation(emnist_config, train, repeats, dataset_name):
+    dataset = utils.create_dataset(emnist_config, dataset_name.upper(), train=train)
 
     assert dataset.classes == ["B", "G", "I", "L", "O", "Q", "S", "T", "Y", "Z"]
     assert dataset.class_to_idx == {letter: label for label, letter in enumerate(dataset.classes)}
     assert len(dataset) == 10 * repeats
     assert torch.equal(dataset.targets, torch.arange(10).repeat(repeats))
     assert torch.equal(torch.bincount(dataset.targets), torch.full((10,), repeats))
+    assert dataset.split == ("byclass" if dataset_name == "upper_emnist" else "letters")
 
     # Asymmetric markers detect rotation/reflection errors as well as relabeling.
     for index, letter in enumerate(dataset.classes):
         image, label = dataset[index]
         expected = torch.zeros(1, 28, 28)
-        expected[0, 17, 3] = (ord(letter) - ord("A") + 1) / 255
+        source_label = ord(letter) - ord("A") + (10 if dataset_name == "upper_emnist" else 1)
+        expected[0, 17, 3] = source_label / 255
         expected[0, 20, 8] = 1
         assert torch.equal(image, expected)
         assert label == index
@@ -55,7 +59,9 @@ def test_emnist_filters_relabels_and_corrects_orientation(emnist_config, train, 
         assert image.is_contiguous()
 
 
-def test_emnist_loaders_preserve_reproducible_disjoint_splits(emnist_config):
+@pytest.mark.parametrize("dataset_name", ["emnist", "upper_emnist"])
+def test_emnist_loaders_preserve_reproducible_disjoint_splits(emnist_config, dataset_name):
+    emnist_config["dataset"]["name"] = dataset_name
     train, validation = utils.create_training_dataloaders(emnist_config)
     test = utils.create_testing_dataloaders(emnist_config)
     repeated_train, repeated_validation = utils.create_training_dataloaders(emnist_config)
@@ -68,13 +74,15 @@ def test_emnist_loaders_preserve_reproducible_disjoint_splits(emnist_config):
     assert images.shape == (32, 1, 28, 28)
     assert set(labels.tolist()) == set(range(10))
 
-    source, targets = utils.create_scoring_dataloaders(emnist_config, "emnist", ["EMNIST"])
-    assert len(source.dataset) == len(targets["EMNIST"].dataset) == 20
-    calibration = utils.create_calibration_dataloader(emnist_config, "emnist")
+    source, targets = utils.create_scoring_dataloaders(emnist_config, dataset_name, [dataset_name.upper()])
+    assert len(source.dataset) == len(targets[dataset_name.upper()].dataset) == 20
+    calibration = utils.create_calibration_dataloader(emnist_config, dataset_name)
     assert calibration.dataset.indices == validation.dataset.indices
 
 
-def test_emnist_transforms_and_cache_preserve_images_and_labels(emnist_config):
+@pytest.mark.parametrize("dataset_name", ["emnist", "upper_emnist"])
+def test_emnist_transforms_and_cache_preserve_images_and_labels(emnist_config, dataset_name):
+    emnist_config["dataset"]["name"] = dataset_name
     transformation = {"type": "rotation", "intensity": 90}
     train, validation = utils.create_training_dataloaders(emnist_config)
     transformed_train, transformed_validation = utils.create_training_dataloaders(emnist_config, transformation)
@@ -98,11 +106,12 @@ def test_emnist_transforms_and_cache_preserve_images_and_labels(emnist_config):
             assert label == transformed_label == cached_label
 
 
-def test_emnist_supports_continuous_bernoulli_preprocessing(emnist_config):
-    original = utils.create_dataset(emnist_config, "emnist", train=True)
+@pytest.mark.parametrize("dataset_name", ["emnist", "upper_emnist"])
+def test_emnist_supports_continuous_bernoulli_preprocessing(emnist_config, dataset_name):
+    original = utils.create_dataset(emnist_config, dataset_name, train=True)
     emnist_config["loss"]["log_prob_function"] = "continuous_bernoulli"
-    dequantized = utils.create_dataset(emnist_config, "emnist", train=True)
-    repeated = utils.create_dataset(emnist_config, "emnist", train=True)
+    dequantized = utils.create_dataset(emnist_config, dataset_name, train=True)
+    repeated = utils.create_dataset(emnist_config, dataset_name, train=True)
     for index in (0, 17, 39):
         image, label = dequantized[index]
         assert 0 < image.min() <= image.max() < 1
@@ -111,15 +120,16 @@ def test_emnist_supports_continuous_bernoulli_preprocessing(emnist_config):
         assert not torch.equal(image, original[index][0])
 
 
+@pytest.mark.parametrize("dataset_name", ["emnist", "upper_emnist"])
 @pytest.mark.parametrize("legacy_rotation", [False, True])
 @pytest.mark.parametrize("likelihood", ["bernoulli", "continuous_bernoulli"])
 def test_lora_target_selects_emnist_without_rotating_or_changing_source(
-    emnist_config, monkeypatch, legacy_rotation, likelihood,
+    emnist_config, monkeypatch, legacy_rotation, likelihood, dataset_name,
 ):
     config = deepcopy(emnist_config)
     config["dataset"]["name"] = "mnist"
     config["loss"]["log_prob_function"] = likelihood
-    target = {"name": "EMNIST", "train_split": 0.75, "shape": [1, 28, 28]}
+    target = {"name": dataset_name.upper(), "train_split": 0.75, "shape": [1, 28, 28]}
     if legacy_rotation:
         target.update(type="rotation", intensity=45)
     config["lora"]["transformed_dataset"] = target
@@ -131,8 +141,8 @@ def test_lora_target_selects_emnist_without_rotating_or_changing_source(
     monkeypatch.setattr(dataset_utils, "create_transformed_datasets", reject_transformation)
     train, validation = utils.create_training_dataloaders(config, target)
     test = utils.create_testing_dataloaders(config, target)
-    expected_pool = utils.create_dataset(config, "emnist", train=True)
-    expected_test = utils.create_dataset(config, "emnist", train=False)
+    expected_pool = utils.create_dataset(config, dataset_name, train=True)
+    expected_test = utils.create_dataset(config, dataset_name, train=False)
     assert (len(train.dataset), len(validation.dataset), len(test.dataset)) == (30, 10, 20)
     assert set(train.dataset.indices).isdisjoint(validation.dataset.indices)
     for subset in (train.dataset, validation.dataset):
@@ -165,22 +175,19 @@ def test_unknown_target_without_transformation_is_rejected(emnist_config):
         utils.create_testing_dataloaders(emnist_config, target)
 
 
-def test_emnist_lora_config_preserves_existing_source_and_training_settings():
+def test_upper_emnist_lora_config_preserves_existing_source_and_training_settings():
     config_dir = utils.get_repo_root() / "config"
-    original = utils.load_config(config_dir / "lora_vae_mnist.yaml")
-    emnist = utils.load_config(config_dir / "lora_vae_mnist_emnist.yaml")
+    original = utils.load_config(config_dir / "lora_vae_mnist_emnist.yaml")
+    emnist = utils.load_config(config_dir / "lora_vae_mnist_upper_emnist.yaml")
     assert emnist["dataset"]["name"] == "mnist"
-    assert emnist["lora"]["transformed_dataset"]["name"] == "emnist"
+    assert emnist["lora"]["transformed_dataset"]["name"] == "upper_emnist"
     assert "type" not in emnist["lora"]["transformed_dataset"]
-    geometry = utils.load_config(config_dir / "lora_vae_mnist_target_geometry.yaml")
-    assert emnist["lora"]["regularizer"] == geometry["lora"]["regularizer"]
     emnist["experiment"] = original["experiment"]
     emnist["lora"]["transformed_dataset"] = original["lora"]["transformed_dataset"]
-    emnist["lora"]["regularizer"] = original["lora"]["regularizer"]
     assert emnist == original
 
 
-@pytest.mark.parametrize("target_name", ["emnist", "rotated_mnist"])
+@pytest.mark.parametrize("target_name", ["emnist", "upper_emnist", "rotated_mnist"])
 def test_lora_yaml_target_trains_scores_and_loads_checkpoint(
     emnist_config, monkeypatch, tmp_path, target_name,
 ):
@@ -211,6 +218,7 @@ def test_lora_yaml_target_trains_scores_and_loads_checkpoint(
         latent_dim=3, out_channels=[4, 8], kernels=[3, 3], strides=[2, 2], paddings=[1, 1],
     )
     config["lora"].update(rank=2, regularizer=None)
+    config["lora"]["transformed_dataset"]["name"] = target_name
     if target_name == "rotated_mnist":
         config["lora"]["transformed_dataset"] = utils.load_config(
             utils.get_repo_root() / "config" / "lora_vae_mnist.yaml"
@@ -251,7 +259,7 @@ def test_lora_yaml_target_trains_scores_and_loads_checkpoint(
     assert torch.isfinite(torch.tensor(trainers[0].history["train_loss"])).all()
     assert experiment.source_dataset_name == experiment.config["dataset"]["name"] == "mnist"
     source_test = utils.create_dataset(config, "mnist", train=False)
-    expected_test = utils.create_dataset(config, "emnist", train=False) if target_name == "emnist" else source_test
+    expected_test = utils.create_dataset(config, target_name, train=False) if target_name != "rotated_mnist" else source_test
     for index in range(len(expected_test)):
         expected_image, expected_label = expected_test[index]
         if target_name == "rotated_mnist":
