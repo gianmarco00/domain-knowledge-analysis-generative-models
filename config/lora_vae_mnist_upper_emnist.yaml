@@ -94,15 +94,7 @@ lora:
     train: true
     train_split: 0.8
     shape: [1, 28, 28]
-  regularizer:
-    mode: target_geometry
-    view: target_only
-    eta: 100.0
-    geometry_batch_size: 64
-    calibration_batches: 128
-    validation_batches: 64
-    dual_learning_rate: 0.01
-    energy_floor: 1.0e-12
+  regularizer: Null 
 
 
 seed: 42
