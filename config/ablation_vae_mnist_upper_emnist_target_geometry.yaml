@@ -8,17 +8,19 @@ base_config: config/lora_vae_mnist_upper_emnist.yaml
 ablation:
   regularizer_mode: target_geometry
   output_dir: ablations/vae_mnist_upper_emnist_target_geometry_clipped
-  parallel_models: 14
+  parallel_models: 3
   seeds:
   - 42
   eta_values:
   - 10.0
   - 100.0
   - 1000.0
+  - 5000.0
   geometry_batch_sizes:
   - 32
   - 64
   dual_learning_rates:
+  - 0.001
   - 0.01
   - 0.1
   controls:
