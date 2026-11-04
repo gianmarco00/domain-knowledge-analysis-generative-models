@@ -20,11 +20,11 @@ dataloader:
   num_workers: 0
 
 training:
-  epochs: 160
-  learning_rate: 0.01
+  epochs: 200
+  learning_rate: 0.001
   # Clip the combined VAE + geometry gradient before Adam. Set enabled: false to disable.
   gradient_clipping:
-    enabled: true
+    enabled: false
     max_norm: 100.0
 
 loss:
@@ -55,9 +55,9 @@ lr_scheduler:
   threshold_mode: abs
   min_lr: 0.0001
   factor: 0.5
-  patience: 15
+  patience: 20
   cooldown: 5
-  start_epoch: 50
+  start_epoch: 100
 
 
 scoring:
